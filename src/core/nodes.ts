@@ -46,9 +46,10 @@ function normalizeUpgradeLevel(value: unknown, errorMessage?: string): number {
   const normalized = Math.floor(value)
   if ((normalized < 0 || normalized > GAME_CONFIG.nodeUpgrade.maxLevel) && errorMessage) {
     NODE_DEFINITION_NORMALIZATION_ERRORS.push(errorMessage)
+    return 0
   }
 
-  return Math.min(GAME_CONFIG.nodeUpgrade.maxLevel, Math.max(0, normalized))
+  return Math.max(0, normalized)
 }
 
 function normalizeUnlockRequirement(nodeID: number, unlockRequirement?: RawNodeUnlockRequirement) {
