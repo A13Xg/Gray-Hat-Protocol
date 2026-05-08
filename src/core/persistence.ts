@@ -96,7 +96,8 @@ export function importSave(raw: string): GameState {
     const importedState = applyLoadTime(deserializeState(raw))
     saveGame(importedState)
     return importedState
-  } catch {
+  } catch (error) {
+    console.error('Failed to import save data.', error)
     const fallbackState = createImportFallbackState()
     saveGame(fallbackState)
     return fallbackState
