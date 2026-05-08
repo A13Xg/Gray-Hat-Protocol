@@ -65,8 +65,8 @@ function normalizeDefinition(definition: RawNodeDefinition): NodeDefinition {
     nodeID: definition.nodeID,
     nodeName: definition.nodeName,
     nodeType: definition.nodeType,
-    baseInput: toPartialDecimalResourceMap(definition.nodeID, 'baseInput', definition.baseInput),
-    baseOutput: toPartialDecimalResourceMap(definition.nodeID, 'baseOutput', definition.baseOutput),
+    baseInput: toPartialDecimalResourceMap(`Node ${definition.nodeID}`, 'baseInput', definition.baseInput),
+    baseOutput: toPartialDecimalResourceMap(`Node ${definition.nodeID}`, 'baseOutput', definition.baseOutput),
     baseMultiplier: toDecimal(definition.baseMultiplier, `Node ${definition.nodeID} has an invalid baseMultiplier.`),
     modMultiplier: toDecimal(definition.modMultiplier, `Node ${definition.nodeID} has an invalid modMultiplier.`),
     unlockRequirement: normalizeUnlockRequirement(definition.nodeID, definition.unlockRequirement),
@@ -76,7 +76,7 @@ function normalizeDefinition(definition: RawNodeDefinition): NodeDefinition {
 }
 
 function toPartialDecimalResourceMap(
-  nodeID: number,
+  ownerLabel: string,
   fieldName: 'baseInput' | 'baseOutput',
   resourceMap?: Partial<Record<ResourceKey, Decimal | number | string>>,
 ): PartialResourceMap {
@@ -87,7 +87,7 @@ function toPartialDecimalResourceMap(
       continue
     }
 
-    partial[key as ResourceKey] = toDecimal(value, `Node ${nodeID} has an invalid ${fieldName}.${key} value.`)
+    partial[key as ResourceKey] = toDecimal(value, `${ownerLabel} has an invalid ${fieldName}.${key} value.`)
   }
 
   return partial
@@ -150,7 +150,7 @@ export function getScaledOutput(definition: NodeDefinition, runtimeState: NodeRu
 
 export function getNodeUpgradeCost(currentLevel: number): PartialResourceMap {
   return calculateScaledResourceMap(
-    toPartialDecimalResourceMap(0, 'baseInput', GAME_CONFIG.nodeUpgrade.baseCost),
+    toPartialDecimalResourceMap('Config nodeUpgrade', 'baseInput', GAME_CONFIG.nodeUpgrade.baseCost),
     currentLevel,
     toDecimal(GAME_CONFIG.nodeUpgrade.costMultiplier),
     new Decimal(1),
