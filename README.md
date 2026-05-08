@@ -12,6 +12,8 @@ Gray Protocol is a browser-based incremental idle game foundation rebuilt around
 - Live site: https://a13xg.github.io/Gray-Hat-Protocol/
 - Repository: https://github.com/A13Xg/Gray-Hat-Protocol
 - Deployment model: fully static client-side app with no server runtime required
+- Required Pages setting: **Settings → Pages → Source = GitHub Actions**
+- Deployment workflow: `.github/workflows/deploy-pages.yml` builds Vite output and deploys `/dist`
 
 ## Tech Stack
 
@@ -43,6 +45,7 @@ npm run build
 
 - Run `npm run build`
 - Open the basic test UI locally and verify node actions, ticking, save controls, and debug menu actions
+- Confirm the Pages workflow succeeds and publishes the built static artifact
 
 ## Architecture Overview
 
