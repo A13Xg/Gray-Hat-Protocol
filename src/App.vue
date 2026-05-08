@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import Decimal from 'break_eternity.js'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import { GAME_CONFIG } from './core/config'
@@ -23,6 +24,7 @@ import { formatDuration, formatReputation, formatResource } from './utils/format
 const state = ref(loadGame())
 const savePayload = ref('')
 const isForceClearing = ref(false)
+const debugStatusMessage = ref('')
 const debugResources = ref<Record<ResourceKey, string>>({
   money: state.value.resources.money.toString(),
   crypto: state.value.resources.crypto.toString(),
@@ -110,13 +112,24 @@ function clearCurrentSave(): void {
 }
 
 function applyDebugResources(): void {
+  for (const [resourceKey, value] of Object.entries(debugResources.value)) {
+    try {
+      new Decimal(value)
+    } catch {
+      debugStatusMessage.value = `Invalid ${resourceKey} value. Enter a finite number.`
+      return
+    }
+  }
+
   state.value = replaceResources(state.value, debugResources.value)
   syncDebugResourcesFromState()
+  debugStatusMessage.value = 'Applied debug resource values.'
 }
 
 function simulateDebugTick(deltaMs: number): void {
   state.value = tick(state.value, deltaMs)
   syncDebugResourcesFromState()
+  debugStatusMessage.value = `Simulated ${deltaMs}ms of game time.`
 }
 
 async function forceClearCurrentBrowserState(): Promise<void> {
@@ -130,6 +143,7 @@ async function forceClearCurrentBrowserState(): Promise<void> {
     )
     savePayload.value = ''
     syncDebugResourcesFromState()
+    debugStatusMessage.value = 'Force-cleared Gray Protocol save data and scoped browser cache state.'
   } finally {
     isForceClearing.value = false
   }
@@ -271,6 +285,7 @@ function formatUpgradeCost(nodeID: number): string {
           {{ isForceClearing ? 'Clearing…' : 'Force Clear Save/Cache' }}
         </button>
       </div>
+      <p v-if="debugStatusMessage" class="debug-status">{{ debugStatusMessage }}</p>
     </section>
 
     <section class="panel">
@@ -373,6 +388,11 @@ button:disabled {
 .debug-field {
   display: grid;
   gap: 0.4rem;
+}
+
+.debug-status {
+  margin: 0;
+  color: #93c5fd;
 }
 
 .log-list {

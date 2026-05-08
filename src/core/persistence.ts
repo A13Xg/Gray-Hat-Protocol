@@ -12,9 +12,14 @@ function canUseSessionStorage(): boolean {
   return typeof sessionStorage !== 'undefined'
 }
 
+function getGrayProtocolScopePatterns(): string[] {
+  const normalizedSaveKey = GAME_CONFIG.saveKey.toLowerCase()
+  return Array.from(new Set([normalizedSaveKey, normalizedSaveKey.replace(/-save$/, '')]))
+}
+
 function matchesGrayProtocolScope(value: string): boolean {
   const normalized = value.toLowerCase()
-  return normalized.includes('gray-hat-protocol') || normalized.includes('gray-hat-protocol-save')
+  return getGrayProtocolScopePatterns().some((pattern) => normalized.includes(pattern))
 }
 
 function readStoredState(): string | null {
