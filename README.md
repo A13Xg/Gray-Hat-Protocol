@@ -9,7 +9,7 @@ Gray Protocol is a browser-based incremental idle game foundation rebuilt around
 
 ## GitHub Pages
 
-https://A13Xg.github.io/Gray-Hat-Protocol/
+https://a13xg.github.io/Gray-Hat-Protocol/
 
 ## Tech Stack
 
