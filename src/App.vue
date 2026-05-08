@@ -2,7 +2,7 @@
 import Decimal from 'break_eternity.js'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
-import { GAME_CONFIG } from './core/config'
+import { GAME_CONFIG, RESOURCE_KEYS } from './core/config'
 import {
   canUpgradeNode,
   createInitialGameState,
@@ -25,6 +25,7 @@ const state = ref(loadGame())
 const savePayload = ref('')
 const isForceClearing = ref(false)
 const debugStatusMessage = ref('')
+const debugResourceKeys = RESOURCE_KEYS
 const debugResources = ref<Record<ResourceKey, string>>({
   money: state.value.resources.money.toString(),
   crypto: state.value.resources.crypto.toString(),
@@ -114,7 +115,10 @@ function clearCurrentSave(): void {
 function applyDebugResources(): void {
   for (const [resourceKey, value] of Object.entries(debugResources.value)) {
     try {
-      new Decimal(value)
+      const normalized = new Decimal(value)
+      if (!normalized.isFinite()) {
+        throw new Error('non-finite')
+      }
     } catch {
       debugStatusMessage.value = `Invalid ${resourceKey} value. Enter a finite number.`
       return
@@ -270,7 +274,7 @@ function formatUpgradeCost(nodeID: number): string {
       <p>Testing helpers for the static GitHub Pages build.</p>
 
       <div class="resource-grid">
-        <label v-for="resourceKey in ['money', 'crypto', 'compute', 'reputation']" :key="resourceKey" class="debug-field">
+        <label v-for="resourceKey in debugResourceKeys" :key="resourceKey" class="debug-field">
           <strong>{{ resourceKey }}</strong>
           <input v-model="debugResources[resourceKey as ResourceKey]" type="text" :placeholder="resourceKey" />
         </label>
