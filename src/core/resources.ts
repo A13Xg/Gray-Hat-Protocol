@@ -72,7 +72,7 @@ export function multiplyResourceMap(resources: PartialResourceMap, multiplier: D
 }
 
 export function canAffordResources(resources: ResourceMap, cost: PartialResourceMap): boolean {
-  return RESOURCE_KEYS.every((key) => resources[key].gte(cost[key] ?? 0))
+  return Object.entries(cost).every(([key, value]) => resources[key as ResourceKey].gte(value ?? 0))
 }
 
 export function applyResourceCost(resources: ResourceMap, cost: PartialResourceMap): ResourceMap {
