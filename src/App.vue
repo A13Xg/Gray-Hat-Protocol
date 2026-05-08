@@ -7,19 +7,37 @@ import {
   createInitialGameState,
   executeClickNode,
   getNodeUpgradeCost,
+  replaceResources,
   startTimedNode,
   tick,
   togglePassiveNode,
   upgradeNode,
 } from './core/engine'
+import type { ResourceKey } from './core/types'
 import { NODE_DEFINITIONS, getScaledInput, getScaledOutput } from './core/nodes'
-import { clearSave, exportSave, importSave, loadGame, saveGame } from './core/persistence'
+import { clearSave, exportSave, forceClearBrowserState, importSave, loadGame, saveGame } from './core/persistence'
 import { getReputationAlignment } from './core/resources'
 import { calculateDeltaMs, nowMs } from './core/time'
 import { formatDuration, formatReputation, formatResource } from './utils/formatter'
 
 const state = ref(loadGame())
 const savePayload = ref('')
+const isForceClearing = ref(false)
+const debugResources = ref<Record<ResourceKey, string>>({
+  money: state.value.resources.money.toString(),
+  crypto: state.value.resources.crypto.toString(),
+  compute: state.value.resources.compute.toString(),
+  reputation: state.value.resources.reputation.toString(),
+})
+
+function syncDebugResourcesFromState(): void {
+  debugResources.value = {
+    money: state.value.resources.money.toString(),
+    crypto: state.value.resources.crypto.toString(),
+    compute: state.value.resources.compute.toString(),
+    reputation: state.value.resources.reputation.toString(),
+  }
+}
 
 function stepGame(): void {
   const timestamp = nowMs()
@@ -72,6 +90,7 @@ function saveCurrentGame(): void {
 
 function loadCurrentGame(): void {
   state.value = loadGame()
+  syncDebugResourcesFromState()
 }
 
 function exportCurrentGame(): void {
@@ -80,12 +99,40 @@ function exportCurrentGame(): void {
 
 function importCurrentGame(): void {
   state.value = importSave(savePayload.value)
+  syncDebugResourcesFromState()
 }
 
 function clearCurrentSave(): void {
   clearSave()
   state.value = createInitialGameState()
   savePayload.value = ''
+  syncDebugResourcesFromState()
+}
+
+function applyDebugResources(): void {
+  state.value = replaceResources(state.value, debugResources.value)
+  syncDebugResourcesFromState()
+}
+
+function simulateDebugTick(deltaMs: number): void {
+  state.value = tick(state.value, deltaMs)
+  syncDebugResourcesFromState()
+}
+
+async function forceClearCurrentBrowserState(): Promise<void> {
+  isForceClearing.value = true
+
+  try {
+    await forceClearBrowserState()
+    state.value = createInitialGameState()
+    state.value.log = [...state.value.log, 'Force-cleared browser save data and scoped cache state.'].slice(
+      -GAME_CONFIG.logMaxEntries,
+    )
+    savePayload.value = ''
+    syncDebugResourcesFromState()
+  } finally {
+    isForceClearing.value = false
+  }
 }
 
 function formatScaledResourceMap(nodeID: number, mode: 'input' | 'output'): string {
@@ -193,6 +240,7 @@ function formatUpgradeCost(nodeID: number): string {
 
     <section class="panel">
       <h2>Save Controls</h2>
+      <p>Everything runs client-side so GitHub Pages only needs static hosting and browser storage APIs.</p>
       <div class="actions save-actions">
         <button @click="saveCurrentGame">Save</button>
         <button @click="loadCurrentGame">Load</button>
@@ -201,6 +249,28 @@ function formatUpgradeCost(nodeID: number): string {
         <button @click="clearCurrentSave">Clear Save</button>
       </div>
       <textarea v-model="savePayload" rows="10" placeholder="Exported save data appears here."></textarea>
+    </section>
+
+    <section class="panel">
+      <h2>Debug Menu</h2>
+      <p>Testing helpers for the static GitHub Pages build.</p>
+
+      <div class="resource-grid">
+        <label v-for="resourceKey in ['money', 'crypto', 'compute', 'reputation']" :key="resourceKey" class="debug-field">
+          <strong>{{ resourceKey }}</strong>
+          <input v-model="debugResources[resourceKey as ResourceKey]" type="text" :placeholder="resourceKey" />
+        </label>
+      </div>
+
+      <div class="actions save-actions">
+        <button @click="syncDebugResourcesFromState">Sync Current Resources</button>
+        <button @click="applyDebugResources">Apply Resource Values</button>
+        <button @click="simulateDebugTick(1_000)">Tick +1s</button>
+        <button @click="simulateDebugTick(60_000)">Tick +60s</button>
+        <button @click="forceClearCurrentBrowserState" :disabled="isForceClearing">
+          {{ isForceClearing ? 'Clearing…' : 'Force Clear Save/Cache' }}
+        </button>
+      </div>
     </section>
 
     <section class="panel">
@@ -275,7 +345,8 @@ function formatUpgradeCost(nodeID: number): string {
 }
 
 button,
-textarea {
+textarea,
+input {
   width: 100%;
   border-radius: 0.5rem;
   border: 1px solid #6b7280;
@@ -297,6 +368,11 @@ button:disabled {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   margin-bottom: 0.75rem;
+}
+
+.debug-field {
+  display: grid;
+  gap: 0.4rem;
 }
 
 .log-list {

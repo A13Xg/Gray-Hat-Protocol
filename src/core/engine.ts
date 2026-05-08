@@ -17,10 +17,11 @@ import {
   createInitialResourceMap,
   multiplyResourceMap,
   repairResourceMap,
+  toDecimalResourceMap,
 } from './resources'
 import { applyActiveTime, createInitialTimeState } from './time'
 import { STARTER_NODE_DEFINITION_ERRORS, repairGameState, validateGameState } from './validation'
-import type { GameState, NodeDefinition, NodeRuntimeState, PartialResourceMap } from './types'
+import type { DecimalSource, GameState, NodeDefinition, NodeRuntimeState, PartialResourceMap, ResourceKey } from './types'
 
 function cloneNodeStateMap(nodes: Record<number, NodeRuntimeState>): Record<number, NodeRuntimeState> {
   return Object.fromEntries(Object.values(nodes).map((runtimeState) => [runtimeState.nodeID, { ...runtimeState }]))
@@ -267,4 +268,19 @@ export function applyOfflineProgress(state: GameState, offlineMs: number): GameS
   }
 
   return finalizeState(progressedState)
+}
+
+export function replaceResources(
+  state: GameState,
+  resources: Partial<Record<ResourceKey, DecimalSource>>,
+): GameState {
+  const nextState = cloneGameState(state)
+  nextState.resources = repairResourceMap(
+    toDecimalResourceMap({
+      ...nextState.resources,
+      ...resources,
+    }),
+  )
+  appendLog(nextState, 'Debug resources updated.')
+  return finalizeState(updateUnlockStates(nextState))
 }

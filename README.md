@@ -1,15 +1,17 @@
 # Gray Protocol
 
-![Vue](https://img.shields.io/badge/Vue-3-42b883)
-![TypeScript](https://img.shields.io/badge/TypeScript-5-blue)
-![Vite](https://img.shields.io/badge/Vite-Build-646CFF)
-![GitHub Pages](https://img.shields.io/badge/Deploy-GitHub%20Pages-black)
+[![GitHub Pages](https://img.shields.io/badge/GitHub%20Pages-Live-2ea44f?logo=githubpages)](https://a13xg.github.io/Gray-Hat-Protocol/)
+[![Vue 3](https://img.shields.io/badge/Vue-3-42b883?logo=vuedotjs&logoColor=white)](https://vuejs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Vite](https://img.shields.io/badge/Vite-Static%20Build-646cff?logo=vite&logoColor=white)](https://vite.dev/)
 
 Gray Protocol is a browser-based incremental idle game foundation rebuilt around a small, deterministic, UI-independent core engine.
 
 ## GitHub Pages
 
-https://a13xg.github.io/Gray-Hat-Protocol/
+- Live site: https://a13xg.github.io/Gray-Hat-Protocol/
+- Repository: https://github.com/A13Xg/Gray-Hat-Protocol
+- Deployment model: fully static client-side app with no server runtime required
 
 ## Tech Stack
 
@@ -40,7 +42,7 @@ npm run build
 ## Health Check
 
 - Run `npm run build`
-- Open the basic test UI locally and verify node actions, ticking, and save controls
+- Open the basic test UI locally and verify node actions, ticking, save controls, and debug menu actions
 
 ## Architecture Overview
 
@@ -78,6 +80,16 @@ Required node dependencies are treated as “must already be unlocked”.
 - Decimal resources serialize to strings
 - Saves include version, time state, log entries, and node runtime state
 - Loading applies capped offline progress through the same engine logic used for active play
+- Export/import works entirely in-browser, making it compatible with GitHub Pages hosting constraints
+
+## Debug Menu
+
+The test UI includes a debug menu intended for browser-only and GitHub Pages validation:
+
+- manually set `money`, `crypto`, `compute`, and `reputation`
+- run forced short/long ticks
+- sync the debug form from the current state
+- force-clear Gray Protocol save data and scoped browser cache/service-worker state
 
 ## GitHub Pages Deployment Note
 

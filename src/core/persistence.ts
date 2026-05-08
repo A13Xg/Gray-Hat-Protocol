@@ -8,6 +8,15 @@ function canUseLocalStorage(): boolean {
   return typeof localStorage !== 'undefined'
 }
 
+function canUseSessionStorage(): boolean {
+  return typeof sessionStorage !== 'undefined'
+}
+
+function matchesGrayProtocolScope(value: string): boolean {
+  const normalized = value.toLowerCase()
+  return normalized.includes('gray-hat-protocol') || normalized.includes('gray-hat-protocol-save')
+}
+
 function readStoredState(): string | null {
   if (!canUseLocalStorage()) {
     return null
@@ -139,4 +148,42 @@ export function importSave(raw: string): GameState {
 
 export function clearSave(): void {
   removeStoredState()
+}
+
+export async function forceClearBrowserState(): Promise<void> {
+  clearSave()
+
+  if (canUseSessionStorage()) {
+    try {
+      sessionStorage.removeItem(GAME_CONFIG.saveKey)
+    } catch (error) {
+      console.error('Failed to clear save data from sessionStorage.', error)
+    }
+  }
+
+  if (typeof caches !== 'undefined') {
+    try {
+      const cacheKeys = await caches.keys()
+      await Promise.all(
+        cacheKeys
+          .filter((cacheKey) => matchesGrayProtocolScope(cacheKey))
+          .map((cacheKey) => caches.delete(cacheKey)),
+      )
+    } catch (error) {
+      console.error('Failed to clear cache storage.', error)
+    }
+  }
+
+  if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+    try {
+      const registrations = await navigator.serviceWorker.getRegistrations()
+      await Promise.all(
+        registrations
+          .filter((registration) => matchesGrayProtocolScope(registration.scope))
+          .map((registration) => registration.unregister()),
+      )
+    } catch (error) {
+      console.error('Failed to unregister service workers.', error)
+    }
+  }
 }
