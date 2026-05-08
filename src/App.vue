@@ -130,10 +130,10 @@ function applyDebugResources(): void {
   debugStatusMessage.value = 'Applied debug resource values.'
 }
 
-function simulateDebugTick(deltaMs: number): void {
-  state.value = tick(state.value, deltaMs)
+function simulateDebugTick(durationMs: number): void {
+  state.value = tick(state.value, durationMs)
   syncDebugResourcesFromState()
-  debugStatusMessage.value = `Simulated ${deltaMs}ms of game time.`
+  debugStatusMessage.value = `Simulated ${durationMs}ms of game time.`
 }
 
 async function forceClearCurrentBrowserState(): Promise<void> {
@@ -276,7 +276,12 @@ function formatUpgradeCost(nodeID: number): string {
       <div class="resource-grid">
         <label v-for="resourceKey in debugResourceKeys" :key="resourceKey" class="debug-field">
           <strong>{{ resourceKey }}</strong>
-          <input v-model="debugResources[resourceKey as ResourceKey]" type="text" :placeholder="resourceKey" />
+          <input
+            v-model="debugResources[resourceKey as ResourceKey]"
+            type="number"
+            inputmode="decimal"
+            :placeholder="resourceKey"
+          />
         </label>
       </div>
 

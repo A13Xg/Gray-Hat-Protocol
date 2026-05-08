@@ -160,12 +160,16 @@ export async function forceClearBrowserState(): Promise<void> {
 
   if (canUseSessionStorage()) {
     try {
+      const matchingKeys: string[] = []
       for (let index = 0; index < sessionStorage.length; index += 1) {
         const key = sessionStorage.key(index)
         if (key && matchesGrayProtocolScope(key)) {
-          sessionStorage.removeItem(key)
-          index -= 1
+          matchingKeys.push(key)
         }
+      }
+
+      for (const key of matchingKeys) {
+        sessionStorage.removeItem(key)
       }
     } catch (error) {
       console.error('Failed to clear save data from sessionStorage.', error)
