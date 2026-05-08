@@ -1,0 +1,81 @@
+[
+  {
+    "nodeID": 1,
+    "nodeName": "Hack Computer",
+    "nodeType": "clicker",
+    "baseInput": {},
+    "baseOutput": {
+      "money": 1,
+      "reputation": -1
+    },
+    "baseMultiplier": 1.15,
+    "modMultiplier": 1,
+    "unlockRequirement": {},
+    "upgradeLevel": 0
+  },
+  {
+    "nodeID": 2,
+    "nodeName": "Harden Computer",
+    "nodeType": "clicker",
+    "baseInput": {},
+    "baseOutput": {
+      "money": 1,
+      "reputation": 1
+    },
+    "baseMultiplier": 1.15,
+    "modMultiplier": 1,
+    "unlockRequirement": {},
+    "upgradeLevel": 0
+  },
+  {
+    "nodeID": 3,
+    "nodeName": "Crypto Mining",
+    "nodeType": "passive",
+    "baseInput": {},
+    "baseOutput": {
+      "crypto": 0.1
+    },
+    "baseMultiplier": 1.15,
+    "modMultiplier": 1,
+    "unlockRequirement": {},
+    "upgradeLevel": 0
+  },
+  {
+    "nodeID": 4,
+    "nodeName": "Build Payload",
+    "nodeType": "timed-task",
+    "durationMs": 30000,
+    "baseInput": {
+      "money": 50
+    },
+    "baseOutput": {
+      "money": 100,
+      "reputation": -5
+    },
+    "baseMultiplier": 1.15,
+    "modMultiplier": 1,
+    "unlockRequirement": {
+      "reputationMax": 0
+    },
+    "upgradeLevel": 0
+  },
+  {
+    "nodeID": 5,
+    "nodeName": "Security Audit",
+    "nodeType": "timed-task",
+    "durationMs": 30000,
+    "baseInput": {
+      "money": 50
+    },
+    "baseOutput": {
+      "money": 100,
+      "reputation": 5
+    },
+    "baseMultiplier": 1.15,
+    "modMultiplier": 1,
+    "unlockRequirement": {
+      "reputationMin": 0
+    },
+    "upgradeLevel": 0
+  }
+]
