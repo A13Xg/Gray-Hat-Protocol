@@ -35,6 +35,14 @@ function deserializeState(raw: string): GameState {
   return repairGameState(parsed)
 }
 
+function createImportFallbackState(): GameState {
+  const fallbackState = createInitialGameState()
+  fallbackState.log = [...fallbackState.log, 'Import failed. Created a fresh game state.'].slice(
+    -GAME_CONFIG.logMaxEntries,
+  )
+  return fallbackState
+}
+
 function applyLoadTime(state: GameState): GameState {
   const currentTime = nowMs()
   const offlineMs = calculateOfflineMs(state.time, currentTime, GAME_CONFIG.offlineCapMs)
@@ -84,9 +92,15 @@ export function exportSave(state: GameState): string {
 }
 
 export function importSave(raw: string): GameState {
-  const importedState = applyLoadTime(deserializeState(raw))
-  saveGame(importedState)
-  return importedState
+  try {
+    const importedState = applyLoadTime(deserializeState(raw))
+    saveGame(importedState)
+    return importedState
+  } catch {
+    const fallbackState = createImportFallbackState()
+    saveGame(fallbackState)
+    return fallbackState
+  }
 }
 
 export function clearSave(): void {

@@ -23,19 +23,38 @@ function normalizeTimeState(value: Partial<TimeState> | undefined, fallbackNow: 
   }
 }
 
-function normalizeNodeRuntimeState(runtimeState: Partial<NodeRuntimeState> | undefined, nodeID: number): NodeRuntimeState {
-  const initial = createInitialNodeStateMap()[nodeID]
+function normalizeNonNegativeInteger(value: unknown, fallback: number, max?: number): number {
+  if (!isFiniteNumber(value)) {
+    return fallback
+  }
+
+  const normalized = Math.max(0, Math.floor(value))
+  return max === undefined ? normalized : Math.min(max, normalized)
+}
+
+function normalizeNonNegativeNumber(value: unknown, fallback: number): number {
+  return isFiniteNumber(value) ? Math.max(0, value) : fallback
+}
+
+function normalizeNodeRuntimeState(
+  runtimeState: Partial<NodeRuntimeState> | undefined,
+  initial: NodeRuntimeState,
+): NodeRuntimeState {
+  const fallbackUpgradeLevel = initial.upgradeLevel
+  const fallbackProgressMs = initial.progressMs
+  const fallbackCompletions = initial.completions
 
   return {
-    nodeID,
+    nodeID: initial.nodeID,
     unlocked: Boolean(runtimeState?.unlocked ?? initial.unlocked),
     enabled: Boolean(runtimeState?.enabled ?? initial.enabled),
-    upgradeLevel: Math.min(
+    upgradeLevel: normalizeNonNegativeInteger(
+      runtimeState?.upgradeLevel,
+      fallbackUpgradeLevel,
       GAME_CONFIG.nodeUpgrade.maxLevel,
-      Math.max(0, Math.floor(runtimeState?.upgradeLevel ?? initial.upgradeLevel)),
     ),
-    progressMs: Math.max(0, runtimeState?.progressMs ?? initial.progressMs),
-    completions: Math.max(0, Math.floor(runtimeState?.completions ?? initial.completions)),
+    progressMs: normalizeNonNegativeNumber(runtimeState?.progressMs, fallbackProgressMs),
+    completions: normalizeNonNegativeInteger(runtimeState?.completions, fallbackCompletions),
     isRunning: Boolean(runtimeState?.isRunning ?? initial.isRunning),
     autoRun: Boolean(runtimeState?.autoRun ?? initial.autoRun),
   }
@@ -101,10 +120,14 @@ export function repairGameState(rawState?: Partial<GameState> | Partial<Serializ
     toDecimalResourceMap((rawState?.resources as SerializedGameState['resources'] | undefined) ?? createInitialResourceMap()),
   )
   const time = normalizeTimeState(rawState?.time, now)
-  const nodes = createInitialNodeStateMap()
+  const initialNodes = createInitialNodeStateMap()
+  const nodes = { ...initialNodes }
 
   for (const definition of NODE_DEFINITIONS) {
-    nodes[definition.nodeID] = normalizeNodeRuntimeState(rawState?.nodes?.[definition.nodeID], definition.nodeID)
+    nodes[definition.nodeID] = normalizeNodeRuntimeState(
+      rawState?.nodes?.[definition.nodeID],
+      initialNodes[definition.nodeID],
+    )
   }
 
   const repaired: GameState = {
