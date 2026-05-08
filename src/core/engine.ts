@@ -43,10 +43,9 @@ function appendLog(state: GameState, message: string): GameState {
 
 function updateUnlockStates(state: GameState): GameState {
   const nextNodes = cloneNodeStateMap(state.nodes)
-  let changed = true
 
-  while (changed) {
-    changed = false
+  for (let iteration = 0; iteration < NODE_DEFINITIONS.length; iteration += 1) {
+    let changed = false
 
     for (const definition of NODE_DEFINITIONS) {
       const nextUnlocked = isNodeUnlocked(definition, nextNodes, state.resources)
@@ -55,14 +54,17 @@ function updateUnlockStates(state: GameState): GameState {
         changed = true
       }
     }
+
+    if (!changed) {
+      break
+    }
   }
 
-  for (const definition of NODE_DEFINITIONS) {
-    const runtimeState = state.nodes[definition.nodeID]
-    runtimeState.unlocked = nextNodes[definition.nodeID].unlocked
+  state.nodes = nextNodes
 
-    if (!runtimeState.unlocked && definition.nodeType === 'passive') {
-      runtimeState.enabled = false
+  for (const definition of NODE_DEFINITIONS) {
+    if (!state.nodes[definition.nodeID].unlocked && definition.nodeType === 'passive') {
+      state.nodes[definition.nodeID].enabled = false
     }
   }
 

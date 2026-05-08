@@ -34,8 +34,12 @@ function toDecimal(
   }
 }
 
-function normalizeUpgradeLevel(value: unknown): number {
+function normalizeUpgradeLevel(value: unknown, errorMessage?: string): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
+    if (errorMessage) {
+      NODE_DEFINITION_NORMALIZATION_ERRORS.push(errorMessage)
+    }
+
     return 0
   }
 
@@ -66,7 +70,7 @@ function normalizeDefinition(definition: RawNodeDefinition): NodeDefinition {
     baseMultiplier: toDecimal(definition.baseMultiplier, `Node ${definition.nodeID} has an invalid baseMultiplier.`),
     modMultiplier: toDecimal(definition.modMultiplier, `Node ${definition.nodeID} has an invalid modMultiplier.`),
     unlockRequirement: normalizeUnlockRequirement(definition.nodeID, definition.unlockRequirement),
-    upgradeLevel: normalizeUpgradeLevel(definition.upgradeLevel),
+    upgradeLevel: normalizeUpgradeLevel(definition.upgradeLevel, `Node ${definition.nodeID} has an invalid upgradeLevel.`),
     durationMs: definition.durationMs,
   }
 }
