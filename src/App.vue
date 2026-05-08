@@ -67,8 +67,7 @@ function upgradeSelectedNode(nodeID: number): void {
 }
 
 function saveCurrentGame(): void {
-  saveGame(state.value)
-  state.value.time.lastSavedAt = nowMs()
+  state.value = saveGame(state.value)
 }
 
 function loadCurrentGame(): void {

@@ -8,6 +8,45 @@ function canUseLocalStorage(): boolean {
   return typeof localStorage !== 'undefined'
 }
 
+function readStoredState(): string | null {
+  if (!canUseLocalStorage()) {
+    return null
+  }
+
+  try {
+    return localStorage.getItem(GAME_CONFIG.saveKey)
+  } catch (error) {
+    console.error('Failed to read save data from localStorage.', error)
+    return null
+  }
+}
+
+function writeStoredState(rawState: string): boolean {
+  if (!canUseLocalStorage()) {
+    return false
+  }
+
+  try {
+    localStorage.setItem(GAME_CONFIG.saveKey, rawState)
+    return true
+  } catch (error) {
+    console.error('Failed to write save data to localStorage.', error)
+    return false
+  }
+}
+
+function removeStoredState(): void {
+  if (!canUseLocalStorage()) {
+    return
+  }
+
+  try {
+    localStorage.removeItem(GAME_CONFIG.saveKey)
+  } catch (error) {
+    console.error('Failed to clear save data from localStorage.', error)
+  }
+}
+
 function serializeState(state: GameState): SerializedGameState {
   return {
     version: state.version,
@@ -54,11 +93,7 @@ function applyLoadTime(state: GameState): GameState {
   return loadedState
 }
 
-export function saveGame(state: GameState): void {
-  if (!canUseLocalStorage()) {
-    return
-  }
-
+export function saveGame(state: GameState): GameState {
   const stateToSave = repairGameState({
     ...state,
     time: {
@@ -67,15 +102,15 @@ export function saveGame(state: GameState): void {
     },
   })
 
-  localStorage.setItem(GAME_CONFIG.saveKey, JSON.stringify(serializeState(stateToSave)))
+  if (!writeStoredState(JSON.stringify(serializeState(stateToSave)))) {
+    return repairGameState(state)
+  }
+
+  return stateToSave
 }
 
 export function loadGame(): GameState {
-  if (!canUseLocalStorage()) {
-    return createInitialGameState()
-  }
-
-  const rawState = localStorage.getItem(GAME_CONFIG.saveKey)
+  const rawState = readStoredState()
   if (!rawState) {
     return createInitialGameState()
   }
@@ -94,20 +129,14 @@ export function exportSave(state: GameState): string {
 export function importSave(raw: string): GameState {
   try {
     const importedState = applyLoadTime(deserializeState(raw))
-    saveGame(importedState)
-    return importedState
+    return saveGame(importedState)
   } catch (error) {
     console.error('Failed to import save data.', error)
     const fallbackState = createImportFallbackState()
-    saveGame(fallbackState)
-    return fallbackState
+    return saveGame(fallbackState)
   }
 }
 
 export function clearSave(): void {
-  if (!canUseLocalStorage()) {
-    return
-  }
-
-  localStorage.removeItem(GAME_CONFIG.saveKey)
+  removeStoredState()
 }

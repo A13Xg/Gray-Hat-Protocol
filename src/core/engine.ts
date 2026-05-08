@@ -19,7 +19,7 @@ import {
   repairResourceMap,
 } from './resources'
 import { applyActiveTime, createInitialTimeState } from './time'
-import { repairGameState, validateGameState, validateNodeDefinitions } from './validation'
+import { STARTER_NODE_DEFINITION_ERRORS, repairGameState, validateGameState } from './validation'
 import type { GameState, NodeDefinition, NodeRuntimeState, PartialResourceMap } from './types'
 
 function cloneNodeStateMap(nodes: Record<number, NodeRuntimeState>): Record<number, NodeRuntimeState> {
@@ -42,9 +42,24 @@ function appendLog(state: GameState, message: string): GameState {
 }
 
 function updateUnlockStates(state: GameState): GameState {
+  const nextNodes = cloneNodeStateMap(state.nodes)
+  let changed = true
+
+  while (changed) {
+    changed = false
+
+    for (const definition of NODE_DEFINITIONS) {
+      const nextUnlocked = isNodeUnlocked(definition, nextNodes, state.resources)
+      if (nextNodes[definition.nodeID].unlocked !== nextUnlocked) {
+        nextNodes[definition.nodeID].unlocked = nextUnlocked
+        changed = true
+      }
+    }
+  }
+
   for (const definition of NODE_DEFINITIONS) {
     const runtimeState = state.nodes[definition.nodeID]
-    runtimeState.unlocked = isNodeUnlocked(definition, state.nodes, state.resources)
+    runtimeState.unlocked = nextNodes[definition.nodeID].unlocked
 
     if (!runtimeState.unlocked && definition.nodeType === 'passive') {
       runtimeState.enabled = false
@@ -103,9 +118,8 @@ function applyTickProgress(state: GameState, deltaMs: number): GameState {
 }
 
 function validateDefinitionsOrThrow(): void {
-  const errors = validateNodeDefinitions(NODE_DEFINITIONS)
-  if (errors.length > 0) {
-    throw new Error(`Invalid node definitions: ${errors.join(' ')}`)
+  if (STARTER_NODE_DEFINITION_ERRORS.length > 0) {
+    throw new Error(`Invalid node definitions: ${STARTER_NODE_DEFINITION_ERRORS.join(' ')}`)
   }
 }
 
@@ -157,8 +171,6 @@ export function createInitialGameState(): GameState {
 }
 
 export function tick(state: GameState, deltaMs: number): GameState {
-  validateDefinitionsOrThrow()
-
   const nextState = cloneGameState(state)
   nextState.time = applyActiveTime(nextState.time, deltaMs)
   return finalizeState(applyTickProgress(nextState, deltaMs))

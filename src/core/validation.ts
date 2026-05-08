@@ -1,7 +1,13 @@
 import Decimal from 'break_eternity.js'
 
 import { GAME_CONFIG, GAME_VERSION, NODE_TYPES, RESOURCE_KEYS } from './config'
-import { NODE_DEFINITIONS, NODE_DEFINITIONS_BY_ID, createInitialNodeStateMap, isNodeUnlocked } from './nodes'
+import {
+  NODE_DEFINITION_NORMALIZATION_ERRORS,
+  NODE_DEFINITIONS,
+  NODE_DEFINITIONS_BY_ID,
+  createInitialNodeStateMap,
+  isNodeUnlocked,
+} from './nodes'
 import { createInitialResourceMap, repairResourceMap, toDecimalResourceMap, validateResourceMap } from './resources'
 import { createInitialTimeState, nowMs } from './time'
 import type { GameState, NodeDefinition, NodeRuntimeState, SerializedGameState, TimeState } from './types'
@@ -102,6 +108,14 @@ export function validateNodeDefinitions(definitions: NodeDefinition[]): string[]
       errors.push(`Node ${definition.nodeID} must have a positive modMultiplier.`)
     }
 
+    if (
+      !Number.isInteger(definition.upgradeLevel) ||
+      definition.upgradeLevel < 0 ||
+      definition.upgradeLevel > GAME_CONFIG.nodeUpgrade.maxLevel
+    ) {
+      errors.push(`Node ${definition.nodeID} has an invalid upgradeLevel.`)
+    }
+
     if (definition.unlockRequirement.requiredNodeIDs?.some((nodeID) => !Number.isInteger(nodeID))) {
       errors.push(`Node ${definition.nodeID} has an invalid requiredNodeIDs list.`)
     }
@@ -113,6 +127,11 @@ export function validateNodeDefinitions(definitions: NodeDefinition[]): string[]
 
   return errors
 }
+
+export const STARTER_NODE_DEFINITION_ERRORS = [
+  ...NODE_DEFINITION_NORMALIZATION_ERRORS,
+  ...validateNodeDefinitions(NODE_DEFINITIONS),
+]
 
 export function repairGameState(rawState?: Partial<GameState> | Partial<SerializedGameState>): GameState {
   const now = nowMs()
@@ -158,11 +177,7 @@ export function repairGameState(rawState?: Partial<GameState> | Partial<Serializ
 }
 
 export function validateGameState(state: GameState): string[] {
-  const errors = [...validateResourceMap(state.resources)]
-
-  for (const definitionErrors of validateNodeDefinitions(NODE_DEFINITIONS)) {
-    errors.push(definitionErrors)
-  }
+  const errors = [...validateResourceMap(state.resources), ...STARTER_NODE_DEFINITION_ERRORS]
 
   if (!state.version.trim()) {
     errors.push('Game version is required.')
