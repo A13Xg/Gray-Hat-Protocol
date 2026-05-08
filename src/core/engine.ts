@@ -45,7 +45,7 @@ function updateUnlockStates(state: GameState): GameState {
   const nextNodes = cloneNodeStateMap(state.nodes)
   let converged = false
 
-  for (let iteration = 0; iteration <= NODE_DEFINITIONS.length; iteration += 1) {
+  for (let iteration = 0; iteration < NODE_DEFINITIONS.length; iteration += 1) {
     let changed = false
 
     for (const definition of NODE_DEFINITIONS) {
@@ -62,7 +62,13 @@ function updateUnlockStates(state: GameState): GameState {
     }
   }
 
-  if (!converged && NODE_DEFINITIONS.length > 0) {
+  if (
+    !converged &&
+    NODE_DEFINITIONS.length > 0 &&
+    NODE_DEFINITIONS.some(
+      (definition) => nextNodes[definition.nodeID].unlocked !== isNodeUnlocked(definition, nextNodes, state.resources),
+    )
+  ) {
     console.warn('Unlock state resolution reached its iteration limit. Check node dependency definitions.')
   }
 

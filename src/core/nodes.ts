@@ -43,7 +43,12 @@ function normalizeUpgradeLevel(value: unknown, errorMessage?: string): number {
     return 0
   }
 
-  return Math.max(0, Math.floor(value))
+  const normalized = Math.floor(value)
+  if ((normalized < 0 || normalized > GAME_CONFIG.nodeUpgrade.maxLevel) && errorMessage) {
+    NODE_DEFINITION_NORMALIZATION_ERRORS.push(errorMessage)
+  }
+
+  return Math.min(GAME_CONFIG.nodeUpgrade.maxLevel, Math.max(0, normalized))
 }
 
 function normalizeUnlockRequirement(nodeID: number, unlockRequirement?: RawNodeUnlockRequirement) {
@@ -77,7 +82,7 @@ function normalizeDefinition(definition: RawNodeDefinition): NodeDefinition {
 
 function toPartialDecimalResourceMap(
   ownerLabel: string,
-  fieldName: 'baseInput' | 'baseOutput',
+  fieldName: string,
   resourceMap?: Partial<Record<ResourceKey, Decimal | number | string>>,
 ): PartialResourceMap {
   const partial: PartialResourceMap = {}
@@ -150,7 +155,7 @@ export function getScaledOutput(definition: NodeDefinition, runtimeState: NodeRu
 
 export function getNodeUpgradeCost(currentLevel: number): PartialResourceMap {
   return calculateScaledResourceMap(
-    toPartialDecimalResourceMap('Config nodeUpgrade', 'baseInput', GAME_CONFIG.nodeUpgrade.baseCost),
+    toPartialDecimalResourceMap('Node upgrade cost config', 'baseCost', GAME_CONFIG.nodeUpgrade.baseCost),
     currentLevel,
     toDecimal(GAME_CONFIG.nodeUpgrade.costMultiplier),
     new Decimal(1),
