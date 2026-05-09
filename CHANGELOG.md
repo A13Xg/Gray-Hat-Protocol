@@ -5,10 +5,14 @@
 ### Added
 - Debug menu controls for manual resource editing and forced time advancement
 - Force-clear browser state action for Gray Protocol save data and scoped cache cleanup
+- GitHub Actions Pages deployment workflow at `.github/workflows/deploy-pages.yml`
+- In-repo wiki document at `WIKI.md`
+- Pages 404 redirect fallback for repository-base navigation
 
 ### Changed
 - README badges and GitHub Pages deployment links
 - Documentation for static GitHub Pages compatibility and browser-only debugging
+- README deployment instructions now specify using Pages source `GitHub Actions`
 
 ## [0.1.0] - Initial Clean Foundation
 
