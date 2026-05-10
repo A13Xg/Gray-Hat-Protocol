@@ -79,6 +79,7 @@ function serializeState(state: GameState): SerializedGameState {
         } satisfies SerializedNodeRuntimeState,
       ]),
     ),
+    preferences: { ...state.preferences },
     log: [...state.log],
   }
 }

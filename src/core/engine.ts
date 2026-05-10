@@ -33,6 +33,7 @@ function cloneGameState(state: GameState): GameState {
     resources: { ...state.resources },
     time: { ...state.time },
     nodes: cloneNodeStateMap(state.nodes),
+    preferences: { ...state.preferences },
     log: [...state.log],
   }
 }
@@ -52,6 +53,11 @@ function updateUnlockStates(state: GameState): GameState {
       const nextUnlocked = isNodeUnlocked(definition, nextNodes, state.resources)
       if (nextNodes[definition.nodeID].unlocked !== nextUnlocked) {
         nextNodes[definition.nodeID].unlocked = nextUnlocked
+        changed = true
+      }
+
+      if (nextUnlocked && !nextNodes[definition.nodeID].revealed) {
+        nextNodes[definition.nodeID].revealed = true
         changed = true
       }
     }
@@ -152,7 +158,7 @@ export function getNodeUpgradeCost(state: GameState, nodeID: number): PartialRes
 
 export function canUpgradeNode(state: GameState, nodeID: number): boolean {
   const runtimeState = state.nodes[nodeID]
-  if (!runtimeState || runtimeState.upgradeLevel >= GAME_CONFIG.nodeUpgrade.maxLevel) {
+  if (!runtimeState || !runtimeState.unlocked || runtimeState.upgradeLevel >= GAME_CONFIG.nodeUpgrade.maxLevel) {
     return false
   }
 
@@ -167,6 +173,11 @@ export function createInitialGameState(): GameState {
     resources: createInitialResourceMap(),
     time: createInitialTimeState(),
     nodes: createInitialNodeStateMap(),
+    preferences: {
+      soundsEnabled: true,
+      preventSleep: false,
+      adminAccessCode: '1234',
+    },
     log: ['Initialized clean Gray Protocol foundation.'],
   }
 

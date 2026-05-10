@@ -42,6 +42,14 @@ function normalizeNonNegativeNumber(value: unknown, fallback: number): number {
   return isFiniteNumber(value) ? Math.max(0, value) : fallback
 }
 
+function normalizePreferences(value: Partial<GameState['preferences']> | undefined): GameState['preferences'] {
+  return {
+    soundsEnabled: typeof value?.soundsEnabled === 'boolean' ? value.soundsEnabled : true,
+    preventSleep: typeof value?.preventSleep === 'boolean' ? value.preventSleep : false,
+    adminAccessCode: typeof value?.adminAccessCode === 'string' && value.adminAccessCode.trim() ? value.adminAccessCode : '1234',
+  }
+}
+
 function normalizeNodeRuntimeState(
   runtimeState: Partial<NodeRuntimeState> | undefined,
   initial: NodeRuntimeState,
@@ -53,6 +61,7 @@ function normalizeNodeRuntimeState(
   return {
     nodeID: initial.nodeID,
     unlocked: Boolean(runtimeState?.unlocked ?? initial.unlocked),
+    revealed: Boolean(runtimeState?.revealed ?? initial.revealed),
     enabled: Boolean(runtimeState?.enabled ?? initial.enabled),
     upgradeLevel: normalizeNonNegativeInteger(
       runtimeState?.upgradeLevel,
@@ -154,6 +163,7 @@ export function repairGameState(rawState?: Partial<GameState> | Partial<Serializ
     resources,
     time,
     nodes,
+    preferences: normalizePreferences(rawState?.preferences),
     log: Array.isArray(rawState?.log)
       ? rawState.log.filter((entry): entry is string => typeof entry === 'string').slice(-GAME_CONFIG.logMaxEntries)
       : [],
@@ -162,6 +172,7 @@ export function repairGameState(rawState?: Partial<GameState> | Partial<Serializ
   for (const definition of NODE_DEFINITIONS) {
     const runtimeState = repaired.nodes[definition.nodeID]
     runtimeState.unlocked = isNodeUnlocked(definition, repaired.nodes, repaired.resources)
+    runtimeState.revealed = runtimeState.revealed || runtimeState.unlocked
 
     if (definition.nodeType !== 'passive' && runtimeState.enabled) {
       runtimeState.enabled = false

@@ -77,5 +77,37 @@
       "reputationMin": 0
     },
     "upgradeLevel": 0
+  },
+  {
+    "nodeID": 6,
+    "nodeName": "Lockdown Firewall",
+    "nodeType": "clicker",
+    "baseInput": {},
+    "baseOutput": {
+      "money": 12,
+      "reputation": 10
+    },
+    "baseMultiplier": 10,
+    "modMultiplier": 1,
+    "unlockRequirement": {
+      "reputationMin": 300
+    },
+    "upgradeLevel": 0
+  },
+  {
+    "nodeID": 7,
+    "nodeName": "Port-Scan",
+    "nodeType": "clicker",
+    "baseInput": {},
+    "baseOutput": {
+      "money": 12,
+      "reputation": -10
+    },
+    "baseMultiplier": 10,
+    "modMultiplier": 1,
+    "unlockRequirement": {
+      "reputationMax": -300
+    },
+    "upgradeLevel": 0
   }
 ]

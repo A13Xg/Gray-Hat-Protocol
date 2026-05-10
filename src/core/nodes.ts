@@ -111,9 +111,15 @@ export const NODE_DEFINITIONS_BY_ID: Record<number, NodeDefinition> = Object.fro
 )
 
 export function createInitialNodeRuntimeState(definition: NodeDefinition): NodeRuntimeState {
+  const hasUnlockConstraint =
+    definition.unlockRequirement.reputationMin !== undefined ||
+    definition.unlockRequirement.reputationMax !== undefined ||
+    (definition.unlockRequirement.requiredNodeIDs?.length ?? 0) > 0
+
   return {
     nodeID: definition.nodeID,
     unlocked: false,
+    revealed: !hasUnlockConstraint,
     enabled: false,
     upgradeLevel: definition.upgradeLevel,
     progressMs: 0,

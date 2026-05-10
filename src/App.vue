@@ -13,7 +13,7 @@ import {
   upgradeNode,
 } from './core/engine'
 import { NODE_DEFINITIONS, getScaledOutput } from './core/nodes'
-import { clearSave, forceClearBrowserState, loadGame } from './core/persistence'
+import { clearSave, forceClearBrowserState, loadGame, saveGame } from './core/persistence'
 import { getReputationAlignment } from './core/resources'
 import { calculateDeltaMs, nowMs } from './core/time'
 import blackHatImage from './assets/images/BlackHat.png'
@@ -23,6 +23,7 @@ import type { ReputationAlignment, ResourceKey } from './core/types'
 
 type RateMap = Record<ResourceKey, number>
 type CollapsiblePanel = 'resources' | 'clock' | 'clickers' | 'operations' | 'systems'
+type ResizablePanelKey = 'clickers' | 'operations' | 'systems'
 
 const resourceIcons: Record<ResourceKey, string> = {
   money: 'paid',
@@ -44,8 +45,32 @@ const activePanels = reactive<Record<CollapsiblePanel, boolean>>({
   operations: true,
   systems: true,
 })
+const panelLocks = reactive<Record<ResizablePanelKey, boolean>>({
+  clickers: true,
+  operations: true,
+  systems: true,
+})
+const lockedPanelSizes = reactive<Record<ResizablePanelKey, { width: string | null; height: string | null }>>({
+  clickers: { width: null, height: null },
+  operations: { width: null, height: null },
+  systems: { width: null, height: null },
+})
+const panelElements: Record<ResizablePanelKey, HTMLElement | null> = {
+  clickers: null,
+  operations: null,
+  systems: null,
+}
 const visibleTimeMs = ref(state.value.time.totalActiveMs)
 const isDebugMenuOpen = ref(false)
+const isControlMenuOpen = ref(false)
+const isAdminMenuOpen = ref(false)
+const isAdminUnlocked = ref(false)
+const adminCodeEntry = ref('')
+const adminStatusMessage = ref('')
+const adminMoneyValue = ref('0')
+const adminCryptoValue = ref('0')
+const adminComputeValue = ref('0')
+const adminReputationValue = ref('0')
 const isForceClearing = ref(false)
 const debugStatusMessage = ref('')
 const debugResourceKey = ref<ResourceKey>('money')
@@ -65,13 +90,22 @@ const previousResources: Record<ResourceKey, Decimal> = {
 }
 
 let tickIntervalId: number | undefined
+let saveIntervalId: number | undefined
 let frameId: number | undefined
+let wakeLock: WakeLockSentinel | null = null
 let previousRateSampleAt = nowMs()
 let previousFrameAt = nowMs()
+const layoutStorageKey = 'gray-hat-protocol-layout-v1'
 
 const clickerNodes = computed(() => {
-  const allowedNames = new Set(['Hack Computer', 'Harden Computer'])
-  return NODE_DEFINITIONS.filter((node) => node.nodeType === 'clicker' && allowedNames.has(node.nodeName))
+  const allowedNames = new Set(['Hack Computer', 'Harden Computer', 'Lockdown Firewall', 'Port-Scan'])
+  return NODE_DEFINITIONS.filter((node) => {
+    if (node.nodeType !== 'clicker' || !allowedNames.has(node.nodeName)) {
+      return false
+    }
+
+    return Boolean(state.value.nodes[node.nodeID]?.revealed)
+  })
 })
 
 const resourceCards = computed(() => {
@@ -162,6 +196,77 @@ function displayNodeLevel(nodeID: number): number {
 
 function togglePanel(panel: CollapsiblePanel): void {
   activePanels[panel] = !activePanels[panel]
+}
+
+function setPanelElement(panel: ResizablePanelKey, element: unknown): void {
+  panelElements[panel] = element instanceof HTMLElement ? element : null
+}
+
+function saveLayoutPreferences(): void {
+  try {
+    localStorage.setItem(
+      layoutStorageKey,
+      JSON.stringify({
+        panelLocks: { ...panelLocks },
+        lockedPanelSizes: { ...lockedPanelSizes },
+      }),
+    )
+  } catch {
+    // Ignore local storage errors.
+  }
+}
+
+function loadLayoutPreferences(): void {
+  try {
+    const raw = localStorage.getItem(layoutStorageKey)
+    if (!raw) {
+      return
+    }
+
+    const parsed = JSON.parse(raw) as {
+      panelLocks?: Partial<Record<ResizablePanelKey, boolean>>
+      lockedPanelSizes?: Partial<Record<ResizablePanelKey, { width?: string; height?: string }>>
+    }
+
+    for (const key of ['clickers', 'operations', 'systems'] as const) {
+      panelLocks[key] = parsed.panelLocks?.[key] ?? true
+      lockedPanelSizes[key].width = parsed.lockedPanelSizes?.[key]?.width ?? null
+      lockedPanelSizes[key].height = parsed.lockedPanelSizes?.[key]?.height ?? null
+    }
+  } catch {
+    // Ignore malformed layout payloads.
+  }
+}
+
+function panelInlineStyle(panel: ResizablePanelKey): Record<string, string> {
+  if (!panelLocks[panel] || !activePanels[panel]) {
+    return {}
+  }
+
+  const width = lockedPanelSizes[panel].width
+  const height = lockedPanelSizes[panel].height
+  if (!width || !height) {
+    return {}
+  }
+
+  return { width, height }
+}
+
+function togglePanelLock(panel: ResizablePanelKey): void {
+  if (panelLocks[panel]) {
+    panelLocks[panel] = false
+    return
+  }
+
+  const element = panelElements[panel]
+  if (element) {
+    const rect = element.getBoundingClientRect()
+    lockedPanelSizes[panel].width = `${Math.round(rect.width)}px`
+    lockedPanelSizes[panel].height = `${Math.round(rect.height)}px`
+  }
+
+  panelLocks[panel] = true
+  saveLayoutPreferences()
 }
 
 function formatWholeDecimal(value: Decimal): string {
@@ -267,24 +372,158 @@ function handleGlobalKeydown(event: KeyboardEvent): void {
   if (event.key === 'Escape' && isDebugMenuOpen.value) {
     isDebugMenuOpen.value = false
   }
+
+  if (event.key === 'Escape' && isControlMenuOpen.value) {
+    isControlMenuOpen.value = false
+    isAdminMenuOpen.value = false
+  }
+}
+
+async function requestWakeLockIfEnabled(): Promise<void> {
+  if (!state.value.preferences.preventSleep || typeof navigator === 'undefined' || !('wakeLock' in navigator)) {
+    return
+  }
+
+  try {
+    wakeLock = await navigator.wakeLock.request('screen')
+    wakeLock.addEventListener('release', () => {
+      wakeLock = null
+    })
+  } catch {
+    state.value.preferences.preventSleep = false
+  }
+}
+
+async function releaseWakeLock(): Promise<void> {
+  if (!wakeLock) {
+    return
+  }
+
+  try {
+    await wakeLock.release()
+  } finally {
+    wakeLock = null
+  }
+}
+
+function toggleControlMenu(): void {
+  isControlMenuOpen.value = !isControlMenuOpen.value
+  if (!isControlMenuOpen.value) {
+    isAdminMenuOpen.value = false
+  }
+}
+
+async function togglePreventSleep(): Promise<void> {
+  state.value.preferences.preventSleep = !state.value.preferences.preventSleep
+  if (state.value.preferences.preventSleep) {
+    await requestWakeLockIfEnabled()
+  } else {
+    await releaseWakeLock()
+  }
+}
+
+function toggleSounds(): void {
+  state.value.preferences.soundsEnabled = !state.value.preferences.soundsEnabled
+}
+
+function openAdminMenu(): void {
+  isAdminMenuOpen.value = true
+}
+
+function submitAdminCode(): void {
+  if (adminCodeEntry.value === state.value.preferences.adminAccessCode) {
+    isAdminUnlocked.value = true
+    adminMoneyValue.value = state.value.resources.money.toString()
+    adminCryptoValue.value = state.value.resources.crypto.toString()
+    adminComputeValue.value = state.value.resources.compute.toString()
+    adminReputationValue.value = state.value.resources.reputation.toString()
+    adminStatusMessage.value = 'Admin unlocked.'
+  } else {
+    adminStatusMessage.value = 'Incorrect code.'
+    isAdminUnlocked.value = false
+  }
+}
+
+function updateAdminAccessCode(newCode: string): void {
+  if (!newCode.trim()) {
+    adminStatusMessage.value = 'Access code cannot be empty.'
+    return
+  }
+
+  state.value.preferences.adminAccessCode = newCode
+  adminStatusMessage.value = 'Access code updated.'
+}
+
+function applyAdminResourceValues(): void {
+  try {
+    state.value = replaceResources(state.value, {
+      money: new Decimal(adminMoneyValue.value),
+      crypto: new Decimal(adminCryptoValue.value),
+      compute: new Decimal(adminComputeValue.value),
+      reputation: new Decimal(adminReputationValue.value),
+    })
+    adminStatusMessage.value = 'Resource values updated.'
+  } catch {
+    adminStatusMessage.value = 'Enter valid numeric resource values.'
+  }
+}
+
+function persistStateNow(): void {
+  state.value = saveGame(state.value)
+}
+
+function handleBeforeUnload(): void {
+  persistStateNow()
+}
+
+function handlePageHide(): void {
+  persistStateNow()
+}
+
+function handleVisibilityChange(): void {
+  if (document.visibilityState === 'hidden') {
+    persistStateNow()
+    return
+  }
+
+  if (document.visibilityState === 'visible') {
+    void requestWakeLockIfEnabled()
+  }
 }
 
 onMounted(() => {
+  loadLayoutPreferences()
   tickIntervalId = window.setInterval(stepGame, GAME_CONFIG.tickRateMs)
+  saveIntervalId = window.setInterval(() => {
+    persistStateNow()
+  }, 2000)
   frameId = window.setTimeout(animateFrame, 100)
   window.addEventListener('keydown', handleGlobalKeydown)
+  window.addEventListener('beforeunload', handleBeforeUnload)
+  window.addEventListener('pagehide', handlePageHide)
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+  void requestWakeLockIfEnabled()
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleGlobalKeydown)
+  window.removeEventListener('beforeunload', handleBeforeUnload)
+  window.removeEventListener('pagehide', handlePageHide)
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
 
   if (tickIntervalId !== undefined) {
     window.clearInterval(tickIntervalId)
   }
 
+  if (saveIntervalId !== undefined) {
+    window.clearInterval(saveIntervalId)
+  }
+
   if (frameId !== undefined) {
     window.clearTimeout(frameId)
   }
+
+  void releaseWakeLock()
 })
 </script>
 
@@ -319,7 +558,12 @@ onBeforeUnmount(() => {
       </article>
 
       <article class="panel clock-panel">
-        <div class="panel-heading">Elapsed Time</div>
+        <div class="panel-heading panel-heading-with-menu">
+          <span>Elapsed Time</span>
+          <button class="title-menu-button" type="button" aria-label="Open control menu" @click="toggleControlMenu">
+            ≡
+          </button>
+        </div>
         <div class="clock-face">
           <div class="clock-readout" aria-label="Session runtime">
             <template v-for="(segment, index) in clockSegments" :key="segment.label">
@@ -337,46 +581,89 @@ onBeforeUnmount(() => {
     <div class="top-divider" aria-hidden="true"></div>
 
     <section class="node-layout">
-      <article class="panel nodes-panel resizable-panel">
+      <article
+        class="panel nodes-panel resizable-panel"
+        :class="{ 'is-collapsed': !activePanels.clickers, 'is-unlocked': !panelLocks.clickers }"
+        :style="panelInlineStyle('clickers')"
+        :ref="(element) => setPanelElement('clickers', element)"
+      >
         <button class="panel-toggle" type="button" @click="togglePanel('clickers')">
           <span>Keystrokes</span>
-          <span>{{ activePanels.clickers ? 'Collapse' : 'Expand' }}</span>
+          <span class="panel-toggle-right">
+            <span
+              class="panel-lock-button"
+              role="button"
+              tabindex="0"
+              :aria-label="panelLocks.clickers ? 'Unlock resizing for keystrokes panel' : 'Lock keystrokes panel size'"
+              @click.stop="togglePanelLock('clickers')"
+              @keydown.enter.prevent="togglePanelLock('clickers')"
+              @keydown.space.prevent="togglePanelLock('clickers')"
+            >
+              {{ panelLocks.clickers ? 'lock' : 'lock_open' }}
+            </span>
+            <span>{{ activePanels.clickers ? 'Collapse' : 'Expand' }}</span>
+          </span>
         </button>
         <Transition name="panel-reveal">
           <!-- clickersSection: first active node subsection for manual clicker actions. -->
           <div v-if="activePanels.clickers" class="node-grid">
-            <article v-for="node in clickerNodes" :key="node.nodeID" class="node-card">
-              <span class="level-badge">L{{ displayNodeLevel(node.nodeID) }}</span>
-              <div class="node-title">{{ node.nodeName }}</div>
-              <button
-                class="primary-node-action"
-                type="button"
-                :disabled="!state.nodes[node.nodeID].unlocked"
-                @click="executeNode(node.nodeID)"
+            <TransitionGroup name="clicker-entry">
+              <article
+                v-for="node in clickerNodes"
+                :key="node.nodeID"
+                class="node-card"
+                :class="{ 'is-node-locked': !state.nodes[node.nodeID].unlocked }"
               >
-                {{ node.nodeName }}
-              </button>
-              <div class="node-footer">
-                <div class="node-stat">{{ outputSummary(node.nodeID) }}</div>
+                <span class="level-badge">L{{ displayNodeLevel(node.nodeID) }}</span>
+                <div class="node-title">{{ node.nodeName }}</div>
                 <button
-                  class="upgrade-button"
+                  class="primary-node-action"
                   type="button"
-                  :disabled="!canUpgradeNode(state, node.nodeID)"
-                  @click="upgradeSelectedNode(node.nodeID)"
+                  :disabled="!state.nodes[node.nodeID].unlocked"
+                  @click="executeNode(node.nodeID)"
                 >
-                  Upgrade
-                  <small>{{ upgradeCostSummary(node.nodeID) }}</small>
+                  {{ node.nodeName }}
                 </button>
-              </div>
-            </article>
+                <div class="node-footer">
+                  <div class="node-stat">{{ outputSummary(node.nodeID) }}</div>
+                  <button
+                    class="upgrade-button"
+                    type="button"
+                    :disabled="!canUpgradeNode(state, node.nodeID)"
+                    @click="upgradeSelectedNode(node.nodeID)"
+                  >
+                    Upgrade
+                    <small>{{ upgradeCostSummary(node.nodeID) }}</small>
+                  </button>
+                </div>
+              </article>
+            </TransitionGroup>
           </div>
         </Transition>
       </article>
 
-      <article class="panel nodes-panel resizable-panel placeholder-panel">
+      <article
+        class="panel nodes-panel resizable-panel placeholder-panel"
+        :class="{ 'is-collapsed': !activePanels.operations, 'is-unlocked': !panelLocks.operations }"
+        :style="panelInlineStyle('operations')"
+        :ref="(element) => setPanelElement('operations', element)"
+      >
         <button class="panel-toggle" type="button" @click="togglePanel('operations')">
           <span>Operations</span>
-          <span>{{ activePanels.operations ? 'Collapse' : 'Expand' }}</span>
+          <span class="panel-toggle-right">
+            <span
+              class="panel-lock-button"
+              role="button"
+              tabindex="0"
+              :aria-label="panelLocks.operations ? 'Unlock resizing for operations panel' : 'Lock operations panel size'"
+              @click.stop="togglePanelLock('operations')"
+              @keydown.enter.prevent="togglePanelLock('operations')"
+              @keydown.space.prevent="togglePanelLock('operations')"
+            >
+              {{ panelLocks.operations ? 'lock' : 'lock_open' }}
+            </span>
+            <span>{{ activePanels.operations ? 'Collapse' : 'Expand' }}</span>
+          </span>
         </button>
         <Transition name="panel-reveal">
           <div v-if="activePanels.operations" class="placeholder-node info-panel">
@@ -386,10 +673,28 @@ onBeforeUnmount(() => {
         </Transition>
       </article>
 
-      <article class="panel nodes-panel resizable-panel placeholder-panel">
+      <article
+        class="panel nodes-panel resizable-panel placeholder-panel"
+        :class="{ 'is-collapsed': !activePanels.systems, 'is-unlocked': !panelLocks.systems }"
+        :style="panelInlineStyle('systems')"
+        :ref="(element) => setPanelElement('systems', element)"
+      >
         <button class="panel-toggle" type="button" @click="togglePanel('systems')">
           <span>Systems</span>
-          <span>{{ activePanels.systems ? 'Collapse' : 'Expand' }}</span>
+          <span class="panel-toggle-right">
+            <span
+              class="panel-lock-button"
+              role="button"
+              tabindex="0"
+              :aria-label="panelLocks.systems ? 'Unlock resizing for systems panel' : 'Lock systems panel size'"
+              @click.stop="togglePanelLock('systems')"
+              @keydown.enter.prevent="togglePanelLock('systems')"
+              @keydown.space.prevent="togglePanelLock('systems')"
+            >
+              {{ panelLocks.systems ? 'lock' : 'lock_open' }}
+            </span>
+            <span>{{ activePanels.systems ? 'Collapse' : 'Expand' }}</span>
+          </span>
         </button>
         <Transition name="panel-reveal">
           <div v-if="activePanels.systems" class="placeholder-node info-panel">
@@ -399,6 +704,73 @@ onBeforeUnmount(() => {
         </Transition>
       </article>
     </section>
+
+    <Teleport to="body">
+      <Transition name="slide-menu">
+        <aside v-if="isControlMenuOpen" class="control-menu-root" role="dialog" aria-label="Control menu">
+          <header class="control-menu-header">
+            <strong>Control Menu</strong>
+            <button type="button" class="control-close-button" aria-label="Close control menu" @click="isControlMenuOpen = false">
+              X
+            </button>
+          </header>
+          <div class="control-menu-body">
+            <button type="button" class="control-toggle" @click="toggleSounds">
+              <span>Sounds</span>
+              <span>{{ state.preferences.soundsEnabled ? 'Enabled' : 'Disabled' }}</span>
+            </button>
+            <button type="button" class="control-toggle" @click="togglePreventSleep">
+              <span>Prevent Sleep</span>
+              <span>{{ state.preferences.preventSleep ? 'Enabled' : 'Disabled' }}</span>
+            </button>
+            <button type="button" class="admin-entry-button" aria-label="Open admin menu" @click="openAdminMenu">⚙</button>
+          </div>
+
+          <Transition name="slide-menu">
+            <section v-if="isAdminMenuOpen" class="admin-menu" aria-label="Admin menu">
+              <h3>Admin</h3>
+              <div v-if="!isAdminUnlocked" class="admin-code-form">
+                <label>
+                  Access Code
+                  <input v-model="adminCodeEntry" type="password" inputmode="numeric" placeholder="1234" />
+                </label>
+                <button type="button" @click="submitAdminCode">Unlock</button>
+              </div>
+              <div v-else class="admin-code-form">
+                <label>
+                  Set Access Code
+                  <input
+                    :value="state.preferences.adminAccessCode"
+                    type="text"
+                    @change="updateAdminAccessCode(($event.target as HTMLInputElement).value)"
+                  />
+                </label>
+                <div class="admin-resource-grid">
+                  <label>
+                    Money
+                    <input v-model="adminMoneyValue" type="text" />
+                  </label>
+                  <label>
+                    Crypto
+                    <input v-model="adminCryptoValue" type="text" />
+                  </label>
+                  <label>
+                    Compute
+                    <input v-model="adminComputeValue" type="text" />
+                  </label>
+                  <label>
+                    Reputation
+                    <input v-model="adminReputationValue" type="text" />
+                  </label>
+                </div>
+                <button type="button" @click="applyAdminResourceValues">Apply Resource Values</button>
+              </div>
+              <p v-if="adminStatusMessage" class="admin-status">{{ adminStatusMessage }}</p>
+            </section>
+          </Transition>
+        </aside>
+      </Transition>
+    </Teleport>
 
     <Teleport to="body">
       <div v-if="isDebugMenuOpen" class="debug-overlay" role="dialog" aria-modal="true" aria-label="Debug menu">
@@ -669,10 +1041,14 @@ h1 {
 }
 
 .resizable-panel {
-  resize: both;
+  resize: none;
   min-width: min(100%, 18rem);
   max-width: 100%;
   overflow: auto;
+}
+
+.resizable-panel.is-unlocked {
+  resize: both;
 }
 
 .top-row .resizable-panel {
@@ -726,6 +1102,168 @@ h1 {
   text-shadow: 0 0 10px rgba(0, 245, 255, 0.6);
 }
 
+.panel-heading-with-menu {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.title-menu-button {
+  margin-left: auto;
+  min-width: 1.5rem;
+  min-height: 1.5rem;
+  border: 1px solid rgba(0, 245, 255, 0.55);
+  border-radius: 4px;
+  background: rgba(0, 245, 255, 0.06);
+  color: #00f5ff;
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.control-menu-root {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  right: auto;
+  z-index: 120;
+  width: min(34rem, calc(100vw - 2rem));
+  max-width: calc(100vw - 2rem);
+  max-height: calc(100vh - 2rem);
+  padding: 0.7rem;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  border: 1px solid rgba(0, 245, 255, 0.3);
+  border-radius: 6px;
+  background: rgba(10, 10, 15, 1);
+  box-shadow: 0 0 18px rgba(0, 245, 255, 0.18);
+  overflow-y: auto;
+  overflow-x: hidden;
+  transform: translate(-50%, -50%);
+  transform-origin: center;
+}
+
+.control-menu-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.control-menu-header strong {
+  color: #00f5ff;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+}
+
+.control-menu-header button {
+  min-height: 1.8rem;
+  border: 1px solid rgba(255, 0, 110, 0.58);
+  border-radius: 4px;
+  background: transparent;
+  color: #ff006e;
+  cursor: pointer;
+}
+
+.control-close-button {
+  min-width: 1.8rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.control-menu-body {
+  margin-top: 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-height: 0;
+}
+
+.control-toggle {
+  min-height: 2.2rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border: 1px solid rgba(0, 245, 255, 0.28);
+  border-radius: 4px;
+  background: rgba(0, 245, 255, 0.04);
+  color: #39ff14;
+  cursor: pointer;
+}
+
+.admin-entry-button {
+  margin-top: auto;
+  min-height: 2rem;
+  border: 1px solid rgba(255, 0, 110, 0.58);
+  border-radius: 4px;
+  background: transparent;
+  color: #ff006e;
+  cursor: pointer;
+}
+
+.admin-menu {
+  margin-top: 0.6rem;
+  padding: 0.6rem;
+  border: 1px solid rgba(255, 0, 110, 0.4);
+  border-radius: 4px;
+  background: rgba(255, 0, 110, 0.05);
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.admin-menu h3 {
+  margin: 0 0 0.45rem;
+  color: #00f5ff;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+
+.admin-code-form {
+  display: grid;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.admin-resource-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.4rem;
+}
+
+.admin-code-form label {
+  display: grid;
+  gap: 0.25rem;
+  color: #39ff14;
+  font-size: 0.75rem;
+}
+
+.admin-code-form input {
+  width: 100%;
+  min-width: 0;
+  min-height: 2rem;
+  border: 1px solid rgba(0, 245, 255, 0.2);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.03);
+  color: #00f5ff;
+}
+
+.admin-code-form button {
+  width: 100%;
+  min-height: 2rem;
+  border: 1px solid rgba(255, 0, 110, 0.58);
+  border-radius: 4px;
+  background: transparent;
+  color: #ff006e;
+  cursor: pointer;
+}
+
+.admin-status {
+  margin: 0.5rem 0 0;
+  color: #39ff14;
+  font-size: 0.72rem;
+}
+
 .panel-toggle,
 .primary-node-action,
 .upgrade-button {
@@ -762,6 +1300,33 @@ h1 {
   font-family: "SFMono-Regular", Consolas, monospace;
   font-size: 0.72rem;
   text-shadow: 0 0 6px rgba(57, 255, 20, 0.4);
+}
+
+.panel-toggle-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.panel-lock-button {
+  display: inline-grid;
+  place-items: center;
+  min-width: 1.2rem;
+  min-height: 1.2rem;
+  border: 1px solid rgba(0, 245, 255, 0.34);
+  border-radius: 4px;
+  color: #00f5ff;
+  font-family: "Material Symbols Rounded";
+  font-size: 0.95rem;
+  font-variation-settings: "FILL" 0, "wght" 500, "GRAD" 0, "opsz" 24;
+  line-height: 1;
+  cursor: pointer;
+  user-select: none;
+}
+
+.panel-lock-button:focus-visible {
+  outline: 1px solid #00f5ff;
+  outline-offset: 1px;
 }
 
 .resource-stack {
@@ -905,20 +1470,30 @@ h1 {
   min-height: 13rem;
 }
 
+.nodes-panel.is-collapsed {
+  min-height: 0;
+  padding: 0.45rem;
+  resize: none;
+}
+
+.nodes-panel.is-collapsed .panel-toggle {
+  min-height: 2.2rem;
+}
+
 .node-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
-  gap: 0.9rem;
-  margin-top: 0.9rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  gap: 0.6rem;
+  margin-top: 0.6rem;
 }
 
 .node-card {
   position: relative;
-  min-height: 15rem;
-  padding: 1rem;
+  min-height: 9.5rem;
+  padding: 0.65rem;
   display: grid;
-  grid-template-rows: minmax(1.7rem, auto) minmax(5rem, 1fr) minmax(4.25rem, auto);
-  gap: 0.75rem;
+  grid-template-rows: minmax(1.2rem, auto) minmax(2.8rem, auto) minmax(2.5rem, auto);
+  gap: 0.5rem;
   background: rgba(10, 10, 15, 0.86);
   border: 1px solid rgba(0, 245, 255, 0.24);
   border-radius: 8px;
@@ -932,30 +1507,35 @@ h1 {
   box-shadow: inset 0 0 28px rgba(0, 245, 255, 0.055), 0 0 24px rgba(0, 245, 255, 0.12);
 }
 
+.node-card.is-node-locked {
+  opacity: 0.5;
+  filter: saturate(0.55);
+}
+
 .level-badge {
   position: absolute;
-  top: 0.55rem;
-  left: 0.55rem;
+  top: 0.4rem;
+  left: 0.45rem;
   color: #39ff14;
   font-family: "SFMono-Regular", Consolas, monospace;
-  font-size: 0.76rem;
+  font-size: 0.65rem;
   text-shadow: 0 0 6px rgba(57, 255, 20, 0.4);
 }
 
 .node-title {
-  padding-left: 2.1rem;
+  padding-left: 1.75rem;
   color: #00f5ff;
-  font-size: 0.94rem;
+  font-size: 0.8rem;
   font-weight: 700;
   text-shadow: 0 0 10px rgba(0, 245, 255, 0.6);
 }
 
 .primary-node-action {
   width: 100%;
-  min-height: 5rem;
+  min-height: 2.9rem;
   align-self: stretch;
   border-radius: 8px;
-  font-size: clamp(1.15rem, 4vw, 1.85rem);
+  font-size: clamp(0.82rem, 2.2vw, 1.1rem);
   font-weight: 800;
   cursor: pointer;
   transition: transform 140ms ease, color 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
@@ -981,30 +1561,31 @@ h1 {
 
 .node-footer {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(7.75rem, 0.72fr);
-  gap: 0.75rem;
+  grid-template-columns: minmax(0, 1fr) minmax(6.5rem, 0.8fr);
+  gap: 0.5rem;
   align-items: stretch;
 }
 
 .node-stat {
-  min-height: 4rem;
-  padding: 0.75rem;
+  min-height: 2.5rem;
+  padding: 0.45rem;
   display: grid;
   place-items: center;
   border-right: 1px solid rgba(0, 245, 255, 0.45);
   color: #39ff14;
   font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 0.74rem;
   text-align: center;
   text-shadow: 0 0 6px rgba(57, 255, 20, 0.4);
 }
 
 .upgrade-button {
-  min-height: 4rem;
-  padding: 0.55rem;
+  min-height: 2.5rem;
+  padding: 0.35rem;
   display: grid;
   place-items: center;
   border-radius: 6px;
-  font-size: 0.72rem;
+  font-size: 0.64rem;
   cursor: pointer;
 }
 
@@ -1012,9 +1593,20 @@ h1 {
   max-width: 100%;
   overflow-wrap: anywhere;
   color: #39ff14;
-  font-size: 0.66rem;
+  font-size: 0.58rem;
   text-transform: none;
   text-shadow: 0 0 6px rgba(57, 255, 20, 0.4);
+}
+
+.clicker-entry-enter-active,
+.clicker-entry-leave-active {
+  transition: opacity 220ms ease, transform 220ms ease;
+}
+
+.clicker-entry-enter-from,
+.clicker-entry-leave-to {
+  opacity: 0;
+  transform: translateY(0.45rem) scale(0.98);
 }
 
 .placeholder-node {
@@ -1170,6 +1762,28 @@ h1 {
   transition: opacity 180ms ease, transform 180ms ease, max-height 220ms ease;
   max-height: 48rem;
   overflow: hidden;
+}
+
+.slide-menu-enter-active,
+.slide-menu-leave-active {
+  transition: transform 220ms ease, opacity 220ms ease;
+}
+
+.slide-menu-enter-from,
+.slide-menu-leave-to {
+  opacity: 0;
+}
+
+@media (max-width: 620px) {
+  .control-menu-root {
+    width: calc(100vw - 1.2rem);
+    max-width: calc(100vw - 1.2rem);
+    max-height: calc(100vh - 1.2rem);
+  }
+
+  .admin-resource-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .panel-reveal-enter-from,

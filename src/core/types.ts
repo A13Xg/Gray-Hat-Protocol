@@ -62,6 +62,7 @@ export interface NodeDefinition {
 export interface NodeRuntimeState {
   nodeID: number
   unlocked: boolean
+  revealed: boolean
   enabled: boolean
   upgradeLevel: number
   progressMs: number
@@ -75,12 +76,20 @@ export interface GameState {
   resources: ResourceMap
   time: TimeState
   nodes: Record<number, NodeRuntimeState>
+  preferences: UserPreferences
   log: string[]
+}
+
+export interface UserPreferences {
+  soundsEnabled: boolean
+  preventSleep: boolean
+  adminAccessCode: string
 }
 
 export interface SerializedNodeRuntimeState {
   nodeID: number
   unlocked: boolean
+  revealed: boolean
   enabled: boolean
   upgradeLevel: number
   progressMs: number
@@ -94,5 +103,6 @@ export interface SerializedGameState {
   resources: SerializedResourceMap
   time: TimeState
   nodes: Record<number, SerializedNodeRuntimeState>
+  preferences?: Partial<UserPreferences>
   log: string[]
 }
