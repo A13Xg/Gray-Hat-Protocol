@@ -19,9 +19,18 @@ import {
   repairResourceMap,
   toDecimalResourceMap,
 } from './resources'
+import { getReputationAlignment } from './resources'
 import { applyActiveTime, createInitialTimeState } from './time'
 import { STARTER_NODE_DEFINITION_ERRORS, repairGameState, validateGameState } from './validation'
-import type { DecimalSource, GameState, NodeDefinition, NodeRuntimeState, PartialResourceMap, ResourceKey } from './types'
+import type {
+  DecimalSource,
+  GameState,
+  NodeDefinition,
+  NodeRuntimeState,
+  PartialResourceMap,
+  ResourceKey,
+  TalentKey,
+} from './types'
 
 function cloneNodeStateMap(nodes: Record<number, NodeRuntimeState>): Record<number, NodeRuntimeState> {
   return Object.fromEntries(Object.values(nodes).map((runtimeState) => [runtimeState.nodeID, { ...runtimeState }]))
@@ -33,6 +42,10 @@ function cloneGameState(state: GameState): GameState {
     resources: { ...state.resources },
     time: { ...state.time },
     nodes: cloneNodeStateMap(state.nodes),
+    meta: {
+      ...state.meta,
+      talents: { ...state.meta.talents },
+    },
     preferences: { ...state.preferences },
     log: [...state.log],
   }
@@ -41,6 +54,81 @@ function cloneGameState(state: GameState): GameState {
 function appendLog(state: GameState, message: string): GameState {
   state.log = [...state.log, message].slice(-GAME_CONFIG.logMaxEntries)
   return state
+}
+
+function getTotalTalentLevel(state: GameState): number {
+  return Object.values(state.meta.talents).reduce((sum, level) => sum + level, 0)
+}
+
+function talentScalar(state: GameState, key: TalentKey, perLevel: number): Decimal {
+  return new Decimal(1 + state.meta.talents[key] * perLevel)
+}
+
+function getGlobalOutputMultiplier(
+  state: GameState,
+  definition: NodeDefinition,
+  runtimeState: NodeRuntimeState,
+): Decimal {
+  const alignment = getReputationAlignment(state.resources)
+  const prestigeBoost = new Decimal(1 + state.meta.prestigeCount * 0.18)
+  let multiplier = prestigeBoost
+
+  if (definition.nodeType === 'passive') {
+    multiplier = multiplier.mul(talentScalar(state, 'passiveEfficiency', 0.08))
+  }
+
+  if (definition.nodeType === 'timed-task') {
+    multiplier = multiplier.mul(talentScalar(state, 'taskAcceleration', 0.05))
+  }
+
+  if (definition.nodeType === 'clicker') {
+    if (alignment === 'whitehat') {
+      multiplier = multiplier.mul(talentScalar(state, 'whitehatYield', 0.06))
+    } else if (alignment === 'blackhat') {
+      multiplier = multiplier.mul(talentScalar(state, 'blackhatYield', 0.06))
+    }
+
+    multiplier = multiplier.mul(new Decimal(1 + runtimeState.upgradeLevel * 0.01))
+  }
+
+  multiplier = multiplier.mul(talentScalar(state, 'computeSurge', 0.04))
+  return multiplier
+}
+
+function getScaledOutputWithMeta(
+  state: GameState,
+  definition: NodeDefinition,
+  runtimeState: NodeRuntimeState,
+): PartialResourceMap {
+  const scaled = multiplyResourceMap(
+    getScaledOutput(definition, runtimeState),
+    getGlobalOutputMultiplier(state, definition, runtimeState),
+  )
+
+  if (scaled.reputation) {
+    const stabilityMultiplier = Math.max(0.4, 1 - state.meta.talents.reputationStability * 0.05)
+    scaled.reputation = scaled.reputation.mul(stabilityMultiplier)
+  }
+
+  // Softcap runaway growth to keep progression readable and avoid instant inflation spikes.
+  for (const key of Object.keys(scaled) as ResourceKey[]) {
+    const value = scaled[key]
+    if (!value) {
+      continue
+    }
+
+    const sign = value.lt(0) ? -1 : 1
+    const abs = value.abs()
+    const softcapStart = new Decimal(2500)
+    if (abs.lte(softcapStart)) {
+      continue
+    }
+
+    const compressed = softcapStart.mul(abs.div(softcapStart).pow(0.58))
+    scaled[key] = compressed.mul(sign)
+  }
+
+  return scaled
 }
 
 function updateUnlockStates(state: GameState): GameState {
@@ -92,7 +180,7 @@ function applyTickProgress(state: GameState, deltaMs: number): GameState {
     }
 
     const scaledInput = multiplyResourceMap(getScaledInput(definition, runtimeState), seconds)
-    const scaledOutput = multiplyResourceMap(getScaledOutput(definition, runtimeState), seconds)
+    const scaledOutput = multiplyResourceMap(getScaledOutputWithMeta(state, definition, runtimeState), seconds)
 
     if (!canAffordResources(state.resources, scaledInput)) {
       runtimeState.enabled = false
@@ -118,7 +206,7 @@ function applyTickProgress(state: GameState, deltaMs: number): GameState {
     runtimeState.progressMs = 0
     runtimeState.isRunning = false
     runtimeState.completions += 1
-    state.resources = applyResourceGain(state.resources, getScaledOutput(definition, runtimeState))
+    state.resources = applyResourceGain(state.resources, getScaledOutputWithMeta(state, definition, runtimeState))
     appendLog(state, `${definition.nodeName} completed.`)
   }
 
@@ -173,6 +261,20 @@ export function createInitialGameState(): GameState {
     resources: createInitialResourceMap(),
     time: createInitialTimeState(),
     nodes: createInitialNodeStateMap(),
+    meta: {
+      prestigeCount: 0,
+      cypherShards: 0,
+      lifetimeCypherShards: 0,
+      talentPointsSpent: 0,
+      talents: {
+        whitehatYield: 0,
+        blackhatYield: 0,
+        passiveEfficiency: 0,
+        taskAcceleration: 0,
+        reputationStability: 0,
+        computeSurge: 0,
+      },
+    },
     preferences: {
       soundsEnabled: true,
       preventSleep: false,
@@ -207,7 +309,10 @@ export function executeClickNode(state: GameState, nodeID: number): GameState {
     return appendLog(nextState, `${definition.nodeName} cannot afford its inputs.`)
   }
 
-  nextState.resources = applyResourceGain(applyResourceCost(nextState.resources, scaledInput), getScaledOutput(definition, runtimeState))
+  nextState.resources = applyResourceGain(
+    applyResourceCost(nextState.resources, scaledInput),
+    getScaledOutputWithMeta(nextState, definition, runtimeState),
+  )
   appendLog(nextState, `${definition.nodeName} executed.`)
   return finalizeState(nextState)
 }
@@ -294,4 +399,72 @@ export function replaceResources(
   )
   appendLog(nextState, 'Debug resources updated.')
   return finalizeState(updateUnlockStates(nextState))
+}
+
+export function calculatePrestigeGain(state: GameState): number {
+  const minMoney = new Decimal(GAME_CONFIG.prestige.minMoneyForPrestige)
+  const minAbsRep = new Decimal(GAME_CONFIG.prestige.minAbsReputationForPrestige)
+  const money = state.resources.money.max(0)
+  const absRep = state.resources.reputation.abs()
+
+  if (money.lt(minMoney) || absRep.lt(minAbsRep)) {
+    return 0
+  }
+
+  const moneyScore = Math.floor(Math.sqrt(money.div(GAME_CONFIG.prestige.moneyShardDivisor).toNumber()))
+  const repScore = Math.floor(Math.sqrt(absRep.div(GAME_CONFIG.prestige.reputationShardDivisor).toNumber()))
+  return Math.max(0, GAME_CONFIG.prestige.baseShardBonus + moneyScore + repScore)
+}
+
+export function canPrestige(state: GameState): boolean {
+  return calculatePrestigeGain(state) > 0
+}
+
+export function performPrestige(state: GameState): GameState {
+  const gain = calculatePrestigeGain(state)
+  if (gain <= 0) {
+    return appendLog(cloneGameState(state), 'Prestige requirements not met.')
+  }
+
+  const nextState = createInitialGameState()
+  nextState.meta = {
+    ...state.meta,
+    prestigeCount: state.meta.prestigeCount + 1,
+    cypherShards: state.meta.cypherShards + gain,
+    lifetimeCypherShards: state.meta.lifetimeCypherShards + gain,
+  }
+  nextState.log = [...nextState.log, `Prestiged for ${gain} Cypher Shards.`].slice(-GAME_CONFIG.logMaxEntries)
+  return finalizeState(nextState)
+}
+
+export function getTalentUpgradeCost(state: GameState, key: TalentKey): number {
+  const level = state.meta.talents[key]
+  const costs = GAME_CONFIG.talentTree.costs
+  if (level >= GAME_CONFIG.talentTree.maxTalentLevel || level >= costs.length) {
+    return Number.POSITIVE_INFINITY
+  }
+
+  return costs[level]
+}
+
+export function canUnlockTalent(state: GameState, key: TalentKey): boolean {
+  const level = state.meta.talents[key]
+  if (level >= GAME_CONFIG.talentTree.maxTalentLevel) {
+    return false
+  }
+
+  return state.meta.cypherShards >= getTalentUpgradeCost(state, key)
+}
+
+export function unlockTalent(state: GameState, key: TalentKey): GameState {
+  const nextState = cloneGameState(state)
+  if (!canUnlockTalent(nextState, key)) {
+    return appendLog(nextState, `Talent ${key} cannot be upgraded.`)
+  }
+
+  const cost = getTalentUpgradeCost(nextState, key)
+  nextState.meta.cypherShards -= cost
+  nextState.meta.talents[key] += 1
+  nextState.meta.talentPointsSpent = getTotalTalentLevel(nextState)
+  return appendLog(nextState, `Talent ${key} upgraded to ${nextState.meta.talents[key]}.`)
 }

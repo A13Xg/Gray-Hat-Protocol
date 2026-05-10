@@ -42,14 +42,20 @@ install_node_if_missing() {
 echo "[1/3] Checking Node.js prerequisites..."
 install_node_if_missing
 
-echo "[2/3] Installing project dependencies..."
+echo "[2/3] Installing project dependencies (including future added packages)..."
 if [[ -f package-lock.json ]]; then
-  if ! npm ci; then
-    echo "npm ci failed. Retrying with npm install..."
-    npm install
+  if ! npm ci --include=dev --include=optional; then
+    echo "npm ci failed (often lockfile drift). Retrying with npm install..."
+    npm install --include=dev --include=optional
   fi
 else
-  npm install
+  npm install --include=dev --include=optional
+fi
+
+echo "Verifying dependency tree health..."
+if ! npm ls --depth=0 >/dev/null 2>&1; then
+  echo "Dependency tree has issues. Repairing with npm install..."
+  npm install --include=dev --include=optional
 fi
 
 echo "[3/3] Launching development server..."

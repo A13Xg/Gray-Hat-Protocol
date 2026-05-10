@@ -50,6 +50,37 @@ function normalizePreferences(value: Partial<GameState['preferences']> | undefin
   }
 }
 
+function normalizeTalents(
+  value: Partial<GameState['meta']>['talents'] | undefined,
+): GameState['meta']['talents'] {
+  const maxLevel = GAME_CONFIG.talentTree.maxTalentLevel
+
+  return {
+    whitehatYield: normalizeNonNegativeInteger(value?.whitehatYield, 0, maxLevel),
+    blackhatYield: normalizeNonNegativeInteger(value?.blackhatYield, 0, maxLevel),
+    passiveEfficiency: normalizeNonNegativeInteger(value?.passiveEfficiency, 0, maxLevel),
+    taskAcceleration: normalizeNonNegativeInteger(value?.taskAcceleration, 0, maxLevel),
+    reputationStability: normalizeNonNegativeInteger(value?.reputationStability, 0, maxLevel),
+    computeSurge: normalizeNonNegativeInteger(value?.computeSurge, 0, maxLevel),
+  }
+}
+
+function normalizeMeta(value: Partial<GameState['meta']> | undefined): GameState['meta'] {
+  const talents = normalizeTalents(value?.talents)
+  const spentFromTalents = Object.values(talents).reduce((sum, level) => sum + level, 0)
+
+  return {
+    prestigeCount: normalizeNonNegativeInteger(value?.prestigeCount, 0),
+    cypherShards: normalizeNonNegativeInteger(value?.cypherShards, 0),
+    lifetimeCypherShards: normalizeNonNegativeInteger(value?.lifetimeCypherShards, 0),
+    talentPointsSpent: Math.max(
+      normalizeNonNegativeInteger(value?.talentPointsSpent, spentFromTalents),
+      spentFromTalents,
+    ),
+    talents,
+  }
+}
+
 function normalizeNodeRuntimeState(
   runtimeState: Partial<NodeRuntimeState> | undefined,
   initial: NodeRuntimeState,
@@ -163,6 +194,7 @@ export function repairGameState(rawState?: Partial<GameState> | Partial<Serializ
     resources,
     time,
     nodes,
+    meta: normalizeMeta(rawState?.meta),
     preferences: normalizePreferences(rawState?.preferences),
     log: Array.isArray(rawState?.log)
       ? rawState.log.filter((entry): entry is string => typeof entry === 'string').slice(-GAME_CONFIG.logMaxEntries)

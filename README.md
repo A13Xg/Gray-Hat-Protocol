@@ -5,7 +5,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Vite](https://img.shields.io/badge/Vite-Static%20Build-646cff?logo=vite&logoColor=white)](https://vite.dev/)
 
-Gray Protocol is a browser-based incremental idle game foundation rebuilt around a small, deterministic, UI-independent core engine.
+Gray Protocol is a browser-based cyber incremental game with deterministic simulation, browser-only persistence, reputation-aligned progression, prestige resets, and a talent matrix.
 
 ## GitHub Pages
 
@@ -22,6 +22,7 @@ Gray Protocol is a browser-based incremental idle game foundation rebuilt around
 - Vite
 - break_eternity.js
 - GitHub Pages static deployment
+- Web Audio API for lightweight UI SFX
 
 ## Setup
 
@@ -44,13 +45,17 @@ npm run build
 ## Health Check
 
 - Run `npm run build`
-- Open the basic test UI locally and verify node actions, ticking, save controls, and debug menu actions
+- Open the UI locally and verify:
+  - node actions, ticking, save controls, and debug menu actions
+  - unlock-and-reveal behavior for alignment gated clickers
+  - prestige requirements, reset behavior, and shard gain
+  - talent upgrades consuming shards and affecting output
 - Confirm the Pages workflow succeeds and publishes the built static artifact
 
 ## Architecture Overview
 
-- `src/core/` contains the headless game engine modules for time, resources, nodes, validation, persistence, and state updates
-- `src/App.vue` is a thin test UI that reads state and calls core functions
+- `src/core/` contains the headless game engine modules for time, resources, nodes, validation, persistence, prestige, talents, and state updates
+- `src/App.vue` contains the game UI, advanced panel controls, control/admin overlays, clicker reveal animations, and meta progression panels
 - `src/utils/formatter.ts` contains plain-text display formatting helpers
 
 ## Resource System Summary
@@ -63,6 +68,12 @@ Resources use `Decimal` from `break_eternity.js` and include:
 - `reputation`
 
 Reputation is signed and determines whitehat, greyhat, or blackhat alignment.
+
+Display notation uses compact incremental suffixes:
+
+- `1k`, `10k`, `100k`
+- `1M`, `100M`, `1B`, `1T`, `1Q`
+- then alphabetical tiers such as `1aaa`, `999aaa`, `1aab`...
 
 ## Node System Summary
 
@@ -77,11 +88,50 @@ Supported node types:
 
 Required node dependencies are treated as “must already be unlocked”.
 
+Second-tier alignment clickers:
+
+- `Lockdown Firewall` (whitehat path, unlocks at reputation `>= 300`)
+- `Port-Scan` (blackhat path, unlocks at reputation `<= -300`)
+
+These nodes are hidden until first unlock. After reveal, they remain visible and become disabled/greyed if the player falls out of the required alignment.
+
+The node catalog now includes 30 modules across:
+
+- Keystrokes (clickers)
+- Operations (timed tasks)
+- Systems (passive automation)
+
+Each node card now displays its current scaled input cost directly in the UI.
+
+## Prestige + Talent Summary
+
+- Prestige becomes available once money and reputation thresholds are met.
+- Prestige resets run resources and node runtime while preserving meta progression.
+- Prestige rewards `Cypher Shards`, which are used in the Talent Matrix.
+- Talents provide permanent meta modifiers across future runs:
+  - whitehat clicker amplification
+  - blackhat clicker amplification
+  - passive efficiency
+  - timed-task amplification
+  - reputation volatility dampening
+  - global output scaling
+
+## Minigame Hub
+
+The UI launches a standalone popup Arcade window with multiple modes that convert performance into core resources:
+
+- `Virus Pipe Defense` (tower-defense lane/path control)
+- `Data Heist Ops` (top-down combat control)
+- `Code Breaker X` (logic puzzle decoding)
+- `Firewall 3D Run` (pseudo-3D dodge runner)
+
+Rewards are cashout-capped and fed back into money, compute, and crypto progression loops.
+
 ## Save / Load Summary
 
 - Browser saves use `localStorage`
 - Decimal resources serialize to strings
-- Saves include version, time state, log entries, and node runtime state
+- Saves include version, time state, log entries, node runtime state, preferences, and meta progression state
 - Loading applies capped offline progress through the same engine logic used for active play
 - Export/import works entirely in-browser, making it compatible with GitHub Pages hosting constraints
 

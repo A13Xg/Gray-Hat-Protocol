@@ -2,6 +2,7 @@ import type { GameState, SerializedGameState, SerializedNodeRuntimeState } from 
 import { GAME_CONFIG } from './config'
 import { createInitialGameState, applyOfflineProgress } from './engine'
 import { calculateOfflineMs, nowMs } from './time'
+import { logger } from './logger'
 import { repairGameState } from './validation'
 
 function canUseLocalStorage(): boolean {
@@ -22,17 +23,23 @@ function matchesGrayProtocolScope(value: string): boolean {
   return getGrayProtocolScopePatterns().some((pattern) => normalized.includes(pattern))
 }
 
+function safelyExecute<T>(fallbackValue: T, operationName: string, fn: () => T): T {
+  try {
+    return fn()
+  } catch (error) {
+    logger.error(operationName, error)
+    return fallbackValue
+  }
+}
+
 function readStoredState(): string | null {
   if (!canUseLocalStorage()) {
     return null
   }
 
-  try {
-    return localStorage.getItem(GAME_CONFIG.saveKey)
-  } catch (error) {
-    console.error('Failed to read save data from localStorage.', error)
-    return null
-  }
+  return safelyExecute(null, 'Failed to read save data from localStorage.', () =>
+    localStorage.getItem(GAME_CONFIG.saveKey),
+  )
 }
 
 function writeStoredState(rawState: string): boolean {
@@ -40,13 +47,10 @@ function writeStoredState(rawState: string): boolean {
     return false
   }
 
-  try {
+  return safelyExecute(false, 'Failed to write save data to localStorage.', () => {
     localStorage.setItem(GAME_CONFIG.saveKey, rawState)
     return true
-  } catch (error) {
-    console.error('Failed to write save data to localStorage.', error)
-    return false
-  }
+  })
 }
 
 function removeStoredState(): void {
@@ -54,11 +58,9 @@ function removeStoredState(): void {
     return
   }
 
-  try {
+  safelyExecute(undefined, 'Failed to clear save data from localStorage.', () => {
     localStorage.removeItem(GAME_CONFIG.saveKey)
-  } catch (error) {
-    console.error('Failed to clear save data from localStorage.', error)
-  }
+  })
 }
 
 function serializeState(state: GameState): SerializedGameState {
@@ -146,7 +148,7 @@ export function importSave(raw: string): GameState {
     const importedState = applyLoadTime(deserializeState(raw))
     return saveGame(importedState)
   } catch (error) {
-    console.error('Failed to import save data.', error)
+    logger.error('Failed to import save data.', error)
     const fallbackState = createImportFallbackState()
     return saveGame(fallbackState)
   }
@@ -160,7 +162,7 @@ export async function forceClearBrowserState(): Promise<void> {
   clearSave()
 
   if (canUseSessionStorage()) {
-    try {
+    safelyExecute(undefined, 'Failed to clear save data from sessionStorage.', () => {
       const matchingKeys: string[] = []
       for (let index = 0; index < sessionStorage.length; index += 1) {
         const key = sessionStorage.key(index)
@@ -172,34 +174,28 @@ export async function forceClearBrowserState(): Promise<void> {
       for (const key of matchingKeys) {
         sessionStorage.removeItem(key)
       }
-    } catch (error) {
-      console.error('Failed to clear save data from sessionStorage.', error)
-    }
+    })
   }
 
   if (typeof caches !== 'undefined') {
-    try {
+    await safelyExecute(undefined, 'Failed to clear cache storage.', async () => {
       const cacheKeys = await caches.keys()
       await Promise.all(
         cacheKeys
           .filter((cacheKey) => matchesGrayProtocolScope(cacheKey))
           .map((cacheKey) => caches.delete(cacheKey)),
       )
-    } catch (error) {
-      console.error('Failed to clear cache storage.', error)
-    }
+    })
   }
 
   if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
-    try {
+    await safelyExecute(undefined, 'Failed to unregister service workers.', async () => {
       const registrations = await navigator.serviceWorker.getRegistrations()
       await Promise.all(
         registrations
           .filter((registration) => matchesGrayProtocolScope(registration.scope))
           .map((registration) => registration.unregister()),
       )
-    } catch (error) {
-      console.error('Failed to unregister service workers.', error)
-    }
+    })
   }
 }

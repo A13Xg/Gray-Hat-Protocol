@@ -4,11 +4,8 @@
     "nodeName": "Hack Computer",
     "nodeType": "clicker",
     "baseInput": {},
-    "baseOutput": {
-      "money": 1,
-      "reputation": -1
-    },
-    "baseMultiplier": 1.15,
+    "baseOutput": { "money": 2, "reputation": -1 },
+    "baseMultiplier": 1.12,
     "modMultiplier": 1,
     "unlockRequirement": {},
     "upgradeLevel": 0
@@ -18,96 +15,327 @@
     "nodeName": "Harden Computer",
     "nodeType": "clicker",
     "baseInput": {},
-    "baseOutput": {
-      "money": 1,
-      "reputation": 1
-    },
-    "baseMultiplier": 1.15,
+    "baseOutput": { "money": 2, "reputation": 1 },
+    "baseMultiplier": 1.12,
     "modMultiplier": 1,
     "unlockRequirement": {},
     "upgradeLevel": 0
   },
   {
     "nodeID": 3,
+    "nodeName": "Packet Sniffer",
+    "nodeType": "clicker",
+    "baseInput": {},
+    "baseOutput": { "crypto": 0.6, "reputation": -0.4 },
+    "baseMultiplier": 1.11,
+    "modMultiplier": 1,
+    "unlockRequirement": { "requiredNodeIDs": [1] },
+    "upgradeLevel": 0
+  },
+  {
+    "nodeID": 4,
+    "nodeName": "Patch Sweep",
+    "nodeType": "clicker",
+    "baseInput": {},
+    "baseOutput": { "compute": 0.6, "reputation": 0.4 },
+    "baseMultiplier": 1.11,
+    "modMultiplier": 1,
+    "unlockRequirement": { "requiredNodeIDs": [2] },
+    "upgradeLevel": 0
+  },
+  {
+    "nodeID": 5,
+    "nodeName": "Credential Harvest",
+    "nodeType": "clicker",
+    "baseInput": { "compute": 2 },
+    "baseOutput": { "money": 10, "reputation": -2 },
+    "baseMultiplier": 1.13,
+    "modMultiplier": 1,
+    "unlockRequirement": { "reputationMax": -25 },
+    "upgradeLevel": 0
+  },
+  {
+    "nodeID": 6,
+    "nodeName": "Blue Team Drill",
+    "nodeType": "clicker",
+    "baseInput": { "compute": 2 },
+    "baseOutput": { "money": 10, "reputation": 2 },
+    "baseMultiplier": 1.13,
+    "modMultiplier": 1,
+    "unlockRequirement": { "reputationMin": 25 },
+    "upgradeLevel": 0
+  },
+  {
+    "nodeID": 7,
+    "nodeName": "Lockdown Firewall",
+    "nodeType": "clicker",
+    "baseInput": { "compute": 6 },
+    "baseOutput": { "money": 45, "reputation": 7 },
+    "baseMultiplier": 1.16,
+    "modMultiplier": 1,
+    "unlockRequirement": { "reputationMin": 300 },
+    "upgradeLevel": 0
+  },
+  {
+    "nodeID": 8,
+    "nodeName": "Port-Scan",
+    "nodeType": "clicker",
+    "baseInput": { "compute": 6 },
+    "baseOutput": { "money": 45, "reputation": -7 },
+    "baseMultiplier": 1.16,
+    "modMultiplier": 1,
+    "unlockRequirement": { "reputationMax": -300 },
+    "upgradeLevel": 0
+  },
+  {
+    "nodeID": 9,
+    "nodeName": "Signal Relay",
+    "nodeType": "clicker",
+    "baseInput": { "crypto": 3 },
+    "baseOutput": { "compute": 18, "money": 22 },
+    "baseMultiplier": 1.12,
+    "modMultiplier": 1,
+    "unlockRequirement": { "requiredNodeIDs": [3, 4] },
+    "upgradeLevel": 0
+  },
+  {
+    "nodeID": 10,
+    "nodeName": "Botnet Pulse",
+    "nodeType": "clicker",
+    "baseInput": { "crypto": 6, "compute": 8 },
+    "baseOutput": { "money": 80, "reputation": -4 },
+    "baseMultiplier": 1.15,
+    "modMultiplier": 1,
+    "unlockRequirement": { "requiredNodeIDs": [8] },
+    "upgradeLevel": 0
+  },
+  {
+    "nodeID": 11,
+    "nodeName": "Trust Beacon",
+    "nodeType": "clicker",
+    "baseInput": { "crypto": 6, "compute": 8 },
+    "baseOutput": { "money": 80, "reputation": 4 },
+    "baseMultiplier": 1.15,
+    "modMultiplier": 1,
+    "unlockRequirement": { "requiredNodeIDs": [7] },
+    "upgradeLevel": 0
+  },
+  {
+    "nodeID": 12,
     "nodeName": "Crypto Mining",
     "nodeType": "passive",
     "baseInput": {},
-    "baseOutput": {
-      "crypto": 0.1
-    },
-    "baseMultiplier": 1.15,
+    "baseOutput": { "crypto": 0.2 },
+    "baseMultiplier": 1.1,
     "modMultiplier": 1,
     "unlockRequirement": {},
     "upgradeLevel": 0
   },
   {
-    "nodeID": 4,
+    "nodeID": 13,
+    "nodeName": "Compute Farm",
+    "nodeType": "passive",
+    "baseInput": { "money": 1.4 },
+    "baseOutput": { "compute": 1.2 },
+    "baseMultiplier": 1.1,
+    "modMultiplier": 1,
+    "unlockRequirement": { "requiredNodeIDs": [12] },
+    "upgradeLevel": 0
+  },
+  {
+    "nodeID": 14,
+    "nodeName": "Exploit Broker",
+    "nodeType": "passive",
+    "baseInput": { "compute": 1.5 },
+    "baseOutput": { "money": 2.8, "reputation": -0.06 },
+    "baseMultiplier": 1.11,
+    "modMultiplier": 1,
+    "unlockRequirement": { "reputationMax": -40 },
+    "upgradeLevel": 0
+  },
+  {
+    "nodeID": 15,
+    "nodeName": "Compliance Engine",
+    "nodeType": "passive",
+    "baseInput": { "compute": 1.5 },
+    "baseOutput": { "money": 2.8, "reputation": 0.06 },
+    "baseMultiplier": 1.11,
+    "modMultiplier": 1,
+    "unlockRequirement": { "reputationMin": 40 },
+    "upgradeLevel": 0
+  },
+  {
+    "nodeID": 16,
+    "nodeName": "Threat Intel Feed",
+    "nodeType": "passive",
+    "baseInput": { "crypto": 0.3 },
+    "baseOutput": { "compute": 3.4 },
+    "baseMultiplier": 1.1,
+    "modMultiplier": 1,
+    "unlockRequirement": { "requiredNodeIDs": [13] },
+    "upgradeLevel": 0
+  },
+  {
+    "nodeID": 17,
+    "nodeName": "Dark Web Relay",
+    "nodeType": "passive",
+    "baseInput": { "compute": 5, "crypto": 1.8 },
+    "baseOutput": { "money": 9, "reputation": -0.18 },
+    "baseMultiplier": 1.12,
+    "modMultiplier": 1,
+    "unlockRequirement": { "requiredNodeIDs": [14] },
+    "upgradeLevel": 0
+  },
+  {
+    "nodeID": 18,
+    "nodeName": "Defense Mesh",
+    "nodeType": "passive",
+    "baseInput": { "compute": 5, "crypto": 1.8 },
+    "baseOutput": { "money": 9, "reputation": 0.18 },
+    "baseMultiplier": 1.12,
+    "modMultiplier": 1,
+    "unlockRequirement": { "requiredNodeIDs": [15] },
+    "upgradeLevel": 0
+  },
+  {
+    "nodeID": 19,
+    "nodeName": "Quantum Ledger",
+    "nodeType": "passive",
+    "baseInput": { "money": 4 },
+    "baseOutput": { "crypto": 1.2, "compute": 1.5 },
+    "baseMultiplier": 1.11,
+    "modMultiplier": 1,
+    "unlockRequirement": { "requiredNodeIDs": [16] },
+    "upgradeLevel": 0
+  },
+  {
+    "nodeID": 20,
+    "nodeName": "Autonomous SOC",
+    "nodeType": "passive",
+    "baseInput": { "compute": 10, "crypto": 2.4 },
+    "baseOutput": { "money": 18, "reputation": 0.25 },
+    "baseMultiplier": 1.12,
+    "modMultiplier": 1,
+    "unlockRequirement": { "reputationMin": 140, "requiredNodeIDs": [18] },
+    "upgradeLevel": 0
+  },
+  {
+    "nodeID": 21,
+    "nodeName": "Ghost Infrastructure",
+    "nodeType": "passive",
+    "baseInput": { "compute": 10, "crypto": 2.4 },
+    "baseOutput": { "money": 18, "reputation": -0.25 },
+    "baseMultiplier": 1.12,
+    "modMultiplier": 1,
+    "unlockRequirement": { "reputationMax": -140, "requiredNodeIDs": [17] },
+    "upgradeLevel": 0
+  },
+  {
+    "nodeID": 22,
     "nodeName": "Build Payload",
     "nodeType": "timed-task",
-    "durationMs": 30000,
-    "baseInput": {
-      "money": 50
-    },
-    "baseOutput": {
-      "money": 100,
-      "reputation": -5
-    },
-    "baseMultiplier": 1.15,
+    "durationMs": 22000,
+    "baseInput": { "money": 80, "compute": 10 },
+    "baseOutput": { "money": 140, "reputation": -3 },
+    "baseMultiplier": 1.12,
     "modMultiplier": 1,
-    "unlockRequirement": {
-      "reputationMax": 0
-    },
+    "unlockRequirement": { "reputationMax": 0 },
     "upgradeLevel": 0
   },
   {
-    "nodeID": 5,
+    "nodeID": 23,
     "nodeName": "Security Audit",
     "nodeType": "timed-task",
+    "durationMs": 22000,
+    "baseInput": { "money": 80, "compute": 10 },
+    "baseOutput": { "money": 140, "reputation": 3 },
+    "baseMultiplier": 1.12,
+    "modMultiplier": 1,
+    "unlockRequirement": { "reputationMin": 0 },
+    "upgradeLevel": 0
+  },
+  {
+    "nodeID": 24,
+    "nodeName": "Phishing Campaign",
+    "nodeType": "timed-task",
+    "durationMs": 16000,
+    "baseInput": { "compute": 12, "crypto": 4 },
+    "baseOutput": { "money": 190, "reputation": -4 },
+    "baseMultiplier": 1.13,
+    "modMultiplier": 1,
+    "unlockRequirement": { "requiredNodeIDs": [22] },
+    "upgradeLevel": 0
+  },
+  {
+    "nodeID": 25,
+    "nodeName": "Incident Response Drill",
+    "nodeType": "timed-task",
+    "durationMs": 16000,
+    "baseInput": { "compute": 12, "crypto": 4 },
+    "baseOutput": { "money": 190, "reputation": 4 },
+    "baseMultiplier": 1.13,
+    "modMultiplier": 1,
+    "unlockRequirement": { "requiredNodeIDs": [23] },
+    "upgradeLevel": 0
+  },
+  {
+    "nodeID": 26,
+    "nodeName": "Ransomware Kit",
+    "nodeType": "timed-task",
+    "durationMs": 26000,
+    "baseInput": { "compute": 18, "crypto": 8 },
+    "baseOutput": { "money": 320, "reputation": -7 },
+    "baseMultiplier": 1.14,
+    "modMultiplier": 1,
+    "unlockRequirement": { "reputationMax": -110 },
+    "upgradeLevel": 0
+  },
+  {
+    "nodeID": 27,
+    "nodeName": "Zero Trust Rollout",
+    "nodeType": "timed-task",
+    "durationMs": 26000,
+    "baseInput": { "compute": 18, "crypto": 8 },
+    "baseOutput": { "money": 320, "reputation": 7 },
+    "baseMultiplier": 1.14,
+    "modMultiplier": 1,
+    "unlockRequirement": { "reputationMin": 110 },
+    "upgradeLevel": 0
+  },
+  {
+    "nodeID": 28,
+    "nodeName": "Data Exfiltration Route",
+    "nodeType": "timed-task",
     "durationMs": 30000,
-    "baseInput": {
-      "money": 50
-    },
-    "baseOutput": {
-      "money": 100,
-      "reputation": 5
-    },
+    "baseInput": { "compute": 24, "crypto": 10 },
+    "baseOutput": { "money": 420, "reputation": -8, "compute": 8 },
     "baseMultiplier": 1.15,
     "modMultiplier": 1,
-    "unlockRequirement": {
-      "reputationMin": 0
-    },
+    "unlockRequirement": { "requiredNodeIDs": [26] },
     "upgradeLevel": 0
   },
   {
-    "nodeID": 6,
-    "nodeName": "Lockdown Firewall",
-    "nodeType": "clicker",
-    "baseInput": {},
-    "baseOutput": {
-      "money": 12,
-      "reputation": 10
-    },
-    "baseMultiplier": 10,
+    "nodeID": 29,
+    "nodeName": "Forensics Sweep",
+    "nodeType": "timed-task",
+    "durationMs": 30000,
+    "baseInput": { "compute": 24, "crypto": 10 },
+    "baseOutput": { "money": 420, "reputation": 8, "compute": 8 },
+    "baseMultiplier": 1.15,
     "modMultiplier": 1,
-    "unlockRequirement": {
-      "reputationMin": 300
-    },
+    "unlockRequirement": { "requiredNodeIDs": [27] },
     "upgradeLevel": 0
   },
   {
-    "nodeID": 7,
-    "nodeName": "Port-Scan",
-    "nodeType": "clicker",
-    "baseInput": {},
-    "baseOutput": {
-      "money": 12,
-      "reputation": -10
-    },
-    "baseMultiplier": 10,
+    "nodeID": 30,
+    "nodeName": "AI Co-Processor Weave",
+    "nodeType": "timed-task",
+    "durationMs": 42000,
+    "baseInput": { "money": 520, "crypto": 16, "compute": 34 },
+    "baseOutput": { "compute": 72, "money": 640 },
+    "baseMultiplier": 1.16,
     "modMultiplier": 1,
-    "unlockRequirement": {
-      "reputationMax": -300
-    },
+    "unlockRequirement": { "requiredNodeIDs": [28, 29] },
     "upgradeLevel": 0
   }
 ]

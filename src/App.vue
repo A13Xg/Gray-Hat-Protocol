@@ -1,29 +1,38 @@
 <script setup lang="ts">
 import Decimal from 'break_eternity.js'
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 
 import { GAME_CONFIG, RESOURCE_KEYS } from './core/config'
 import {
+  calculatePrestigeGain,
   canUpgradeNode,
+  canUnlockTalent,
+  canPrestige,
   createInitialGameState,
   executeClickNode,
+  getTalentUpgradeCost,
   getNodeUpgradeCost,
+  performPrestige,
   replaceResources,
+  startTimedNode,
   tick,
+  togglePassiveNode,
+  unlockTalent,
   upgradeNode,
 } from './core/engine'
 import { NODE_DEFINITIONS, getScaledOutput } from './core/nodes'
+import { getScaledInput } from './core/nodes'
 import { clearSave, forceClearBrowserState, loadGame, saveGame } from './core/persistence'
 import { getReputationAlignment } from './core/resources'
 import { calculateDeltaMs, nowMs } from './core/time'
 import blackHatImage from './assets/images/BlackHat.png'
 import greyHatImage from './assets/images/GreyHat.png'
 import whiteHatImage from './assets/images/WhiteHat.png'
-import type { ReputationAlignment, ResourceKey } from './core/types'
+import type { ReputationAlignment, ResourceKey, TalentKey } from './core/types'
+import { formatAbbreviatedDecimal } from './utils/formatter'
 
 type RateMap = Record<ResourceKey, number>
 type CollapsiblePanel = 'resources' | 'clock' | 'clickers' | 'operations' | 'systems'
-type ResizablePanelKey = 'clickers' | 'operations' | 'systems'
 
 const resourceIcons: Record<ResourceKey, string> = {
   money: 'paid',
@@ -45,21 +54,6 @@ const activePanels = reactive<Record<CollapsiblePanel, boolean>>({
   operations: true,
   systems: true,
 })
-const panelLocks = reactive<Record<ResizablePanelKey, boolean>>({
-  clickers: true,
-  operations: true,
-  systems: true,
-})
-const lockedPanelSizes = reactive<Record<ResizablePanelKey, { width: string | null; height: string | null }>>({
-  clickers: { width: null, height: null },
-  operations: { width: null, height: null },
-  systems: { width: null, height: null },
-})
-const panelElements: Record<ResizablePanelKey, HTMLElement | null> = {
-  clickers: null,
-  operations: null,
-  systems: null,
-}
 const visibleTimeMs = ref(state.value.time.totalActiveMs)
 const isDebugMenuOpen = ref(false)
 const isControlMenuOpen = ref(false)
@@ -75,6 +69,7 @@ const isForceClearing = ref(false)
 const debugStatusMessage = ref('')
 const debugResourceKey = ref<ResourceKey>('money')
 const debugResourceAmount = ref('100')
+const minigameStatus = ref('')
 const resourceRates = reactive<RateMap>({
   money: 0,
   crypto: 0,
@@ -95,18 +90,26 @@ let frameId: number | undefined
 let wakeLock: WakeLockSentinel | null = null
 let previousRateSampleAt = nowMs()
 let previousFrameAt = nowMs()
-const layoutStorageKey = 'gray-hat-protocol-layout-v1'
+let minigameRewardPollId: number | undefined
 
-const clickerNodes = computed(() => {
-  const allowedNames = new Set(['Hack Computer', 'Harden Computer', 'Lockdown Firewall', 'Port-Scan'])
-  return NODE_DEFINITIONS.filter((node) => {
-    if (node.nodeType !== 'clicker' || !allowedNames.has(node.nodeName)) {
-      return false
-    }
+const clickerNodes = computed(() =>
+  NODE_DEFINITIONS.filter((node) => node.nodeType === 'clicker' && Boolean(state.value.nodes[node.nodeID]?.revealed)),
+)
+const timedTaskNodes = computed(() =>
+  NODE_DEFINITIONS.filter((node) => node.nodeType === 'timed-task' && Boolean(state.value.nodes[node.nodeID]?.revealed)),
+)
+const passiveNodes = computed(() =>
+  NODE_DEFINITIONS.filter((node) => node.nodeType === 'passive' && Boolean(state.value.nodes[node.nodeID]?.revealed)),
+)
 
-    return Boolean(state.value.nodes[node.nodeID]?.revealed)
-  })
-})
+const talentDefinitions: Array<{ key: TalentKey; name: string; description: string }> = [
+  { key: 'whitehatYield', name: 'Whitehat Doctrine', description: '+6% clicker output while whitehat-aligned.' },
+  { key: 'blackhatYield', name: 'Blackhat Doctrine', description: '+6% clicker output while blackhat-aligned.' },
+  { key: 'passiveEfficiency', name: 'Ghost Threads', description: '+8% passive node efficiency.' },
+  { key: 'taskAcceleration', name: 'Pipeline Burst', description: '+5% timed-task output.' },
+  { key: 'reputationStability', name: 'Social Camouflage', description: '-5% reputation volatility per level (min 40%).' },
+  { key: 'computeSurge', name: 'Quantum Overclock', description: '+4% global output.' },
+]
 
 const resourceCards = computed(() => {
   return RESOURCE_KEYS.map((key) => ({
@@ -117,6 +120,15 @@ const resourceCards = computed(() => {
     rate: formatRate(resourceRates[key]),
   }))
 })
+const prestigeGain = computed(() => calculatePrestigeGain(state.value))
+const talentCards = computed(() =>
+  talentDefinitions.map((definition) => ({
+    ...definition,
+    level: state.value.meta.talents[definition.key],
+    cost: getTalentUpgradeCost(state.value, definition.key),
+    canUpgrade: canUnlockTalent(state.value, definition.key),
+  })),
+)
 const reputationAlignment = computed(() => getReputationAlignment(state.value.resources))
 const hatImageSrc = computed(() => hatImages[reputationAlignment.value])
 const hatWord = computed(() => {
@@ -184,10 +196,51 @@ function animateFrame(): void {
 
 function executeNode(nodeID: number): void {
   state.value = executeClickNode(state.value, nodeID)
+  playUiTone(640, 0.03)
 }
 
 function upgradeSelectedNode(nodeID: number): void {
   state.value = upgradeNode(state.value, nodeID)
+  playUiTone(520, 0.04)
+}
+
+function startTimedTask(nodeID: number): void {
+  state.value = startTimedNode(state.value, nodeID)
+  playUiTone(590, 0.04)
+}
+
+function togglePassiveSystem(nodeID: number): void {
+  const isEnabled = state.value.nodes[nodeID]?.enabled ?? false
+  state.value = togglePassiveNode(state.value, nodeID, !isEnabled)
+  playUiTone(isEnabled ? 420 : 690, 0.03)
+}
+
+function startAllTimedTasks(): void {
+  for (const node of timedTaskNodes.value) {
+    state.value = startTimedNode(state.value, node.nodeID)
+  }
+  playUiTone(700, 0.05)
+}
+
+function enableAllPassiveSystems(enable: boolean): void {
+  for (const node of passiveNodes.value) {
+    state.value = togglePassiveNode(state.value, node.nodeID, enable)
+  }
+  playUiTone(enable ? 760 : 420, 0.05)
+}
+
+function triggerPrestige(): void {
+  const previousPrestigeCount = state.value.meta.prestigeCount
+  state.value = performPrestige(state.value)
+  if (state.value.meta.prestigeCount > previousPrestigeCount) {
+    playUiTone(880, 0.08)
+    playUiTone(1120, 0.1)
+  }
+}
+
+function upgradeTalent(key: TalentKey): void {
+  state.value = unlockTalent(state.value, key)
+  playUiTone(720, 0.04)
 }
 
 function displayNodeLevel(nodeID: number): number {
@@ -198,94 +251,198 @@ function togglePanel(panel: CollapsiblePanel): void {
   activePanels[panel] = !activePanels[panel]
 }
 
-function setPanelElement(panel: ResizablePanelKey, element: unknown): void {
-  panelElements[panel] = element instanceof HTMLElement ? element : null
-}
-
-function saveLayoutPreferences(): void {
-  try {
-    localStorage.setItem(
-      layoutStorageKey,
-      JSON.stringify({
-        panelLocks: { ...panelLocks },
-        lockedPanelSizes: { ...lockedPanelSizes },
-      }),
-    )
-  } catch {
-    // Ignore local storage errors.
-  }
-}
-
-function loadLayoutPreferences(): void {
-  try {
-    const raw = localStorage.getItem(layoutStorageKey)
-    if (!raw) {
-      return
-    }
-
-    const parsed = JSON.parse(raw) as {
-      panelLocks?: Partial<Record<ResizablePanelKey, boolean>>
-      lockedPanelSizes?: Partial<Record<ResizablePanelKey, { width?: string; height?: string }>>
-    }
-
-    for (const key of ['clickers', 'operations', 'systems'] as const) {
-      panelLocks[key] = parsed.panelLocks?.[key] ?? true
-      lockedPanelSizes[key].width = parsed.lockedPanelSizes?.[key]?.width ?? null
-      lockedPanelSizes[key].height = parsed.lockedPanelSizes?.[key]?.height ?? null
-    }
-  } catch {
-    // Ignore malformed layout payloads.
-  }
-}
-
-function panelInlineStyle(panel: ResizablePanelKey): Record<string, string> {
-  if (!panelLocks[panel] || !activePanels[panel]) {
-    return {}
-  }
-
-  const width = lockedPanelSizes[panel].width
-  const height = lockedPanelSizes[panel].height
-  if (!width || !height) {
-    return {}
-  }
-
-  return { width, height }
-}
-
-function togglePanelLock(panel: ResizablePanelKey): void {
-  if (panelLocks[panel]) {
-    panelLocks[panel] = false
+function playUiTone(frequency: number, durationSeconds: number): void {
+  if (!state.value.preferences.soundsEnabled || typeof window === 'undefined') {
     return
   }
 
-  const element = panelElements[panel]
-  if (element) {
-    const rect = element.getBoundingClientRect()
-    lockedPanelSizes[panel].width = `${Math.round(rect.width)}px`
-    lockedPanelSizes[panel].height = `${Math.round(rect.height)}px`
+  const AudioCtx = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+  if (!AudioCtx) {
+    return
   }
 
-  panelLocks[panel] = true
-  saveLayoutPreferences()
+  const context = new AudioCtx()
+  const oscillator = context.createOscillator()
+  const gain = context.createGain()
+  oscillator.type = 'triangle'
+  oscillator.frequency.value = frequency
+  gain.gain.value = 0.03
+  oscillator.connect(gain)
+  gain.connect(context.destination)
+  oscillator.start()
+  gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + durationSeconds)
+  oscillator.stop(context.currentTime + durationSeconds)
+  window.setTimeout(() => {
+    void context.close()
+  }, Math.ceil(durationSeconds * 1000) + 40)
+}
+
+function claimMinigameRewards(money: number, compute: number, crypto: number): void {
+  state.value = replaceResources(state.value, {
+    money: state.value.resources.money.add(money),
+    compute: state.value.resources.compute.add(compute),
+    crypto: state.value.resources.crypto.add(crypto),
+  })
+}
+
+function pollMinigameRewards(): void {
+  const raw = localStorage.getItem('gray-hat-minigame-reward')
+  if (!raw) {
+    return
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as { money?: number; compute?: number; crypto?: number; message?: string }
+    const clampReward = (value: unknown): number => {
+      if (typeof value !== 'number' || !Number.isFinite(value)) {
+        return 0
+      }
+
+      return Math.max(0, Math.min(250_000, Math.floor(value)))
+    }
+
+    const money = clampReward(parsed.money)
+    const compute = clampReward(parsed.compute)
+    const crypto = clampReward(parsed.crypto)
+    claimMinigameRewards(money, compute, crypto)
+    minigameStatus.value =
+      typeof parsed.message === 'string' && parsed.message.trim()
+        ? parsed.message.slice(0, 180)
+        : 'Minigame rewards received.'
+    localStorage.removeItem('gray-hat-minigame-reward')
+  } catch {
+    localStorage.removeItem('gray-hat-minigame-reward')
+  }
+}
+
+function launchDefenseWindow(): void {
+  const popup = window.open('', 'gray-hat-arcade', 'width=1320,height=860,noopener,noreferrer')
+  if (!popup) {
+    minigameStatus.value = 'Popup blocked. Allow popups to launch the standalone game window.'
+    return
+  }
+  popup.opener = null
+
+  const gameHtml = `<!doctype html>
+<html><head><meta charset="utf-8"/><title>Gray Protocol: Arcade Core</title>
+<style>
+body{margin:0;background:#040612;color:#dff;font-family:Segoe UI,Arial,sans-serif}
+#wrap{display:grid;grid-template-columns:340px 1fr;height:100vh}
+#ui{padding:14px;border-right:1px solid #1d5160;background:#06101d;overflow:auto}
+h1{margin:0 0 8px;color:#56f6ff;font-size:19px}
+h2{margin:10px 0 6px;color:#56f6ff;font-size:14px}
+p,li{font-size:12px;color:#8fe}
+button{margin:4px 0;min-height:32px;width:100%;background:#091b2b;color:#56f6ff;border:1px solid #327d8f;border-radius:6px;cursor:pointer}
+canvas{display:block;background:#000}
+.stat{font-size:12px;margin:3px 0}
+.tabs{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.tabs button.active{border-color:#ff2a7f;color:#9eff3d}
+.mini{padding-left:16px}
+</style></head><body><div id="wrap"><div id="ui">
+<h1>Gray Protocol Arcade Core</h1>
+<div class="tabs">
+  <button id="tab-defense" class="active">Virus Pipe Defense</button>
+  <button id="tab-topdown">Data Heist Ops</button>
+  <button id="tab-code">Code Breaker X</button>
+  <button id="tab-runner">Firewall 3D Run</button>
+</div>
+<div class="stat" id="game-name"></div>
+<div class="stat" id="money"></div><div class="stat" id="integrity"></div><div class="stat" id="wave"></div><div class="stat" id="score"></div>
+<button id="action-main">Primary Action</button>
+<button id="cash">Cash Out Rewards</button>
+<h2>Controls</h2>
+<ul class="mini" id="controls"></ul>
+<p id="status"></p>
+</div><canvas id="cv" width="980" height="860"></canvas></div>
+<script>
+const cv=document.getElementById('cv'); const cx=cv.getContext('2d');
+let mode='defense', score=0, integrity=100, wave=0;
+const stats={money:120, bonus:0}; const controls=document.getElementById('controls');
+const actionBtn=document.getElementById('action-main'); const statusEl=document.getElementById('status');
+const grid=40, cols=Math.floor(cv.width/grid), rows=Math.floor(cv.height/grid);
+let keys={}; document.addEventListener('keydown',e=>keys[e.code]=true); document.addEventListener('keyup',e=>keys[e.code]=false);
+const path=[]; for(let x=0;x<cols;x++){ path.push({x, y:Math.floor(rows/2)+(Math.sin(x/2)>0?1:0)})}
+const turrets=[]; const enemies=[]; let spawning=false, spawnLeft=0, spawnTick=0, speed=1;
+const player={x:cv.width/2,y:cv.height/2,v:4,ammo:80}; const bots=[]; const shots=[];
+let secret=''+Math.floor(Math.random()*10000).toString().padStart(4,'0'); let attempts=[]; let guess='';
+let runnerX=0, runnerY=0, runnerV=0.12, gates=[];
+for(let i=0;i<40;i++){ gates.push({z:i*90, gap:Math.random()*220+120}); }
+function setMode(next){
+  mode=next; score=0; integrity=100; wave=0; statusEl.textContent='';
+  document.querySelectorAll('.tabs button').forEach(b=>b.classList.remove('active'));
+  document.getElementById('tab-'+next).classList.add('active');
+  if(next==='defense'){ controls.innerHTML='<li>Mouse: place turret</li><li>Space: start wave</li><li>1/2/3 speed</li>'; actionBtn.textContent='Start Wave'; }
+  if(next==='topdown'){ controls.innerHTML='<li>WASD move</li><li>Mouse click shoot pulse</li><li>Collect dropped data shards</li>'; actionBtn.textContent='Spawn Raid'; bots.length=0; shots.length=0; player.x=cv.width/2; player.y=cv.height/2; player.ammo=80; }
+  if(next==='code'){ controls.innerHTML='<li>Type 4 digits</li><li>Enter submits</li><li>Crack quickly for higher score</li>'; actionBtn.textContent='Submit Guess'; attempts=[]; guess=''; secret=(''+Math.floor(Math.random()*10000)).padStart(4,'0'); }
+  if(next==='runner'){ controls.innerHTML='<li>A/D strafe</li><li>Avoid firewall gates</li><li>Survive distance</li>'; actionBtn.textContent='Boost'; runnerX=cv.width/2; runnerY=cv.height-120; runnerV=0.12; }
+}
+document.getElementById('tab-defense').onclick=()=>setMode('defense');
+document.getElementById('tab-topdown').onclick=()=>setMode('topdown');
+document.getElementById('tab-code').onclick=()=>setMode('code');
+document.getElementById('tab-runner').onclick=()=>setMode('runner');
+function spawnEnemy(){ enemies.push({t:0,hp:34+wave*5,speed:0.013+wave*0.0014});}
+function startWave(){ if(spawning||enemies.length) return; wave++; spawnLeft=10+wave*4; spawning=true;}
+function addTurret(mx,my){ const gx=Math.floor(mx/grid), gy=Math.floor(my/grid); if(stats.money<40) return;
+if(path.some(p=>p.x===gx&&p.y===gy)) return; if(turrets.some(t=>t.x===gx&&t.y===gy)) return;
+turrets.push({x:gx,y:gy,cd:0,range:3.2,dmg:7+wave*0.7}); stats.money-=40;}
+cv.addEventListener('click',e=>{
+const r=cv.getBoundingClientRect(); const x=e.clientX-r.left, y=e.clientY-r.top;
+if(mode==='defense') addTurret(x,y);
+if(mode==='topdown'&&player.ammo>0){ const a=Math.atan2(y-player.y,x-player.x); shots.push({x:player.x,y:player.y,vx:Math.cos(a)*8,vy:Math.sin(a)*8}); player.ammo--; }
+});
+actionBtn.onclick=()=>{ if(mode==='defense') startWave(); if(mode==='topdown'){ for(let i=0;i<6;i++) bots.push({x:Math.random()*cv.width,y:Math.random()*cv.height,hp:14}); } if(mode==='code'){submitGuess();} if(mode==='runner'){runnerV+=0.03;} };
+document.addEventListener('keydown',e=>{ if(mode==='defense'){ if(e.code==='Space')startWave(); if(e.key==='1')speed=1;if(e.key==='2')speed=2;if(e.key==='3')speed=3; } if(mode==='code'&&/\\d/.test(e.key)&&guess.length<4){guess+=e.key;} if(mode==='code'&&e.code==='Backspace'){guess=guess.slice(0,-1);} if(mode==='code'&&e.code==='Enter'){submitGuess();}});
+function submitGuess(){ if(guess.length!==4) return; let exact=0,near=0; const a=secret.split(''); const b=guess.split('');
+for(let i=0;i<4;i++){ if(a[i]===b[i]){exact++; a[i]='#'; b[i]='*';}}
+for(const d of b){ if(d==='*') continue; const idx=a.indexOf(d); if(idx>=0){near++; a[idx]='#';}}
+attempts.unshift(guess+' => '+exact+' exact, '+near+' near'); guess=''; if(exact===4){ score+=Math.max(120,360-attempts.length*24); secret=(''+Math.floor(Math.random()*10000)).padStart(4,'0'); attempts=[]; statusEl.textContent='Code cracked.'; }}
+function tickDefense(){ for(let s=0;s<speed;s++){ if(spawning){spawnTick++; if(spawnTick%18===0&&spawnLeft>0){spawnEnemy();spawnLeft--;} if(spawnLeft<=0)spawning=false;}
+enemies.forEach(en=>en.t+=en.speed); for(let i=enemies.length-1;i>=0;i--){ if(enemies[i].t>=path.length-1){ enemies.splice(i,1); integrity-=4; } }
+turrets.forEach(t=>{ if(t.cd>0){t.cd--; return;} let target=null,best=-1; enemies.forEach(en=>{ const p=path[Math.floor(en.t)]||path[path.length-1]; const d=Math.hypot((p.x+0.5)-(t.x+0.5),(p.y+0.5)-(t.y+0.5)); if(d<=t.range&&en.t>best){best=en.t;target=en;} });
+if(target){ target.hp-=t.dmg; t.cd=12; if(target.hp<=0){ stats.money+=8+wave; score+=10+wave; enemies.splice(enemies.indexOf(target),1);} } });
+if(!spawning&&enemies.length===0&&wave>0){ stats.money+=15+wave*2; score+=18+wave*3; } } }
+function tickTopdown(){ if(keys['KeyW'])player.y-=player.v; if(keys['KeyS'])player.y+=player.v; if(keys['KeyA'])player.x-=player.v; if(keys['KeyD'])player.x+=player.v;
+player.x=Math.max(10,Math.min(cv.width-10,player.x)); player.y=Math.max(10,Math.min(cv.height-10,player.y));
+shots.forEach(s=>{s.x+=s.vx;s.y+=s.vy}); for(let i=shots.length-1;i>=0;i--){ if(shots[i].x<0||shots[i].x>cv.width||shots[i].y<0||shots[i].y>cv.height) shots.splice(i,1);}
+bots.forEach(b=>{const a=Math.atan2(player.y-b.y,player.x-b.x); b.x+=Math.cos(a)*1.3; b.y+=Math.sin(a)*1.3;});
+for(let i=bots.length-1;i>=0;i--){ const b=bots[i]; for(let j=shots.length-1;j>=0;j--){ const s=shots[j]; if(Math.hypot(b.x-s.x,b.y-s.y)<11){ b.hp-=7; shots.splice(j,1); if(b.hp<=0){ bots.splice(i,1); score+=28; player.ammo+=2;} break; } } if(Math.hypot(b.x-player.x,b.y-player.y)<14){ integrity-=0.4; } }
+if(Math.random()<0.03) bots.push({x:Math.random()*cv.width,y:Math.random()*cv.height,hp:14}); }
+function tickRunner(){ if(keys['KeyA']) runnerX-=5; if(keys['KeyD']) runnerX+=5; runnerX=Math.max(30,Math.min(cv.width-30,runnerX)); gates.forEach(g=>g.z-=runnerV*60); if(gates[0].z<20){ gates.shift(); gates.push({z:gates[gates.length-1].z+90,gap:Math.random()*220+120}); score+=3; }
+for(const g of gates){ if(g.z<80&&g.z>40){ const left=g.gap, right=g.gap+220; if(runnerX<left||runnerX>right){ integrity-=0.7; } } } }
+function drawDefense(){ cx.fillStyle='#020b14'; cx.fillRect(0,0,cv.width,cv.height); cx.fillStyle='#0a1c2e'; for(const p of path){cx.fillRect(p.x*grid,p.y*grid,grid,grid);}
+turrets.forEach(t=>{cx.fillStyle='#33f6ff';cx.fillRect(t.x*grid+8,t.y*grid+8,24,24);}); enemies.forEach(e=>{ const p=path[Math.floor(e.t)]||path[path.length-1]; cx.fillStyle='#ff2a7f'; cx.beginPath();cx.arc((p.x+0.5)*grid,(p.y+0.5)*grid,10,0,Math.PI*2);cx.fill(); }); }
+function drawTopdown(){ cx.fillStyle='#050914'; cx.fillRect(0,0,cv.width,cv.height); cx.fillStyle='#00f6ff'; cx.beginPath();cx.arc(player.x,player.y,10,0,Math.PI*2);cx.fill();
+cx.fillStyle='#9eff3d'; shots.forEach(s=>{cx.fillRect(s.x-2,s.y-2,4,4)}); cx.fillStyle='#ff2a7f'; bots.forEach(b=>{cx.beginPath();cx.arc(b.x,b.y,9,0,Math.PI*2);cx.fill();}); cx.fillStyle='#8fe'; cx.fillText('Ammo: '+player.ammo,12,22);}
+function drawCode(){ cx.fillStyle='#070a16'; cx.fillRect(0,0,cv.width,cv.height); cx.fillStyle='#56f6ff'; cx.font='28px monospace'; cx.fillText('Guess: '+guess.padEnd(4,'_'),60,90);
+cx.font='18px monospace'; attempts.slice(0,12).forEach((line,i)=>cx.fillText(line,60,140+i*28));}
+function drawRunner(){ cx.fillStyle='#040812'; cx.fillRect(0,0,cv.width,cv.height); for(const g of gates){ const scale=Math.max(0.2, g.z/900); const y=cv.height-(g.z*0.7); const w=420*scale; const h=24*scale;
+cx.fillStyle='rgba(255,42,127,0.75)'; cx.fillRect(0,y,w*(g.gap/cv.width),h); cx.fillRect(w*((g.gap+220)/cv.width),y,cv.width,h);}
+cx.fillStyle='#9eff3d'; cx.fillRect(runnerX-12,cv.height-80,24,24);}
+function drawHUD(){ document.getElementById('game-name').textContent='Mode: '+mode;
+document.getElementById('money').textContent='Money: '+Math.floor(stats.money); document.getElementById('integrity').textContent='Integrity: '+Math.max(0,Math.floor(integrity));
+document.getElementById('wave').textContent='Wave: '+wave; document.getElementById('score').textContent='Score: '+Math.floor(score);}
+function loop(){ if(mode==='defense'){tickDefense(); drawDefense();} if(mode==='topdown'){tickTopdown(); drawTopdown();} if(mode==='code'){drawCode();} if(mode==='runner'){tickRunner(); drawRunner();}
+drawHUD(); if(integrity>0) requestAnimationFrame(loop); else { statusEl.textContent='Run failed. Cash out or switch mode.'; requestAnimationFrame(loop);} }
+setMode('defense'); loop();
+document.getElementById('cash').onclick=()=>{ const capped=Math.min(180000, Math.max(0, Math.floor(score*2.6 + wave*40 + integrity*7)));
+localStorage.setItem('gray-hat-minigame-reward', JSON.stringify({money:capped,compute:Math.floor(capped*0.36),crypto:Math.floor(capped*0.14),message:'Arcade cashout: +'+capped+' money (capped).'}));
+score=0; wave=0; integrity=100; statusEl.textContent='Rewards sent to main window.'; };
+<\\/script></body></html>`
+  popup.document.write(gameHtml)
+  popup.document.close()
+  minigameStatus.value = 'Opened standalone Arcade Core window.'
 }
 
 function formatWholeDecimal(value: Decimal): string {
-  const numberValue = value.toNumber()
-  if (!Number.isFinite(numberValue)) {
-    return value.toString()
-  }
-
-  return Math.round(numberValue).toLocaleString()
+  return formatAbbreviatedDecimal(value)
 }
 
 function formatSignedWhole(value: Decimal): string {
-  const rounded = Math.round(value.toNumber())
-  return `${rounded >= 0 ? '+' : ''}${rounded.toLocaleString()}`
+  return `${value.gte(0) ? '+' : ''}${formatAbbreviatedDecimal(value.abs())}`
 }
 
 function formatRate(value: number): string {
-  const rounded = Math.round(value)
-  return `${rounded.toLocaleString()}/s`
+  return `${formatAbbreviatedDecimal(new Decimal(value))}/s`
 }
 
 function outputSummary(nodeID: number): string {
@@ -298,6 +455,32 @@ function outputSummary(nodeID: number): string {
   return Object.entries(getScaledOutput(definition, runtimeState))
     .map(([key, value]) => `${formatSignedWhole(value)} ${key === 'reputation' ? 'Rep' : key}`)
     .join(' / ')
+}
+
+function inputCostSummary(nodeID: number, perSecond = false): string {
+  const definition = NODE_DEFINITIONS.find((node) => node.nodeID === nodeID)
+  const runtimeState = state.value.nodes[nodeID]
+  if (!definition || !runtimeState) {
+    return 'No cost'
+  }
+
+  const costs = Object.entries(getScaledInput(definition, runtimeState))
+  if (costs.length === 0) {
+    return 'No cost'
+  }
+
+  const suffix = perSecond ? '/s' : ''
+  return costs.map(([key, value]) => `${formatWholeDecimal(value)} ${key}${suffix}`).join(' / ')
+}
+
+function progressPercent(nodeID: number): number {
+  const definition = NODE_DEFINITIONS.find((node) => node.nodeID === nodeID)
+  const runtimeState = state.value.nodes[nodeID]
+  if (!definition?.durationMs || !runtimeState) {
+    return 0
+  }
+
+  return Math.max(0, Math.min(100, (runtimeState.progressMs / definition.durationMs) * 100))
 }
 
 function upgradeCostSummary(nodeID: number): string {
@@ -491,8 +674,28 @@ function handleVisibilityChange(): void {
   }
 }
 
+watch(
+  () => [clickerNodes.value.length, timedTaskNodes.value.length, passiveNodes.value.length],
+  (next, previous) => {
+    if (!previous) {
+      return
+    }
+
+    if (next[0] > previous[0]) {
+      activePanels.clickers = true
+    }
+
+    if (next[1] > previous[1]) {
+      activePanels.operations = true
+    }
+
+    if (next[2] > previous[2]) {
+      activePanels.systems = true
+    }
+  },
+)
+
 onMounted(() => {
-  loadLayoutPreferences()
   tickIntervalId = window.setInterval(stepGame, GAME_CONFIG.tickRateMs)
   saveIntervalId = window.setInterval(() => {
     persistStateNow()
@@ -502,6 +705,7 @@ onMounted(() => {
   window.addEventListener('beforeunload', handleBeforeUnload)
   window.addEventListener('pagehide', handlePageHide)
   document.addEventListener('visibilitychange', handleVisibilityChange)
+  minigameRewardPollId = window.setInterval(pollMinigameRewards, 800)
   void requestWakeLockIfEnabled()
 })
 
@@ -521,6 +725,10 @@ onBeforeUnmount(() => {
 
   if (frameId !== undefined) {
     window.clearTimeout(frameId)
+  }
+
+  if (minigameRewardPollId !== undefined) {
+    window.clearInterval(minigameRewardPollId)
   }
 
   void releaseWakeLock()
@@ -581,28 +789,10 @@ onBeforeUnmount(() => {
     <div class="top-divider" aria-hidden="true"></div>
 
     <section class="node-layout">
-      <article
-        class="panel nodes-panel resizable-panel"
-        :class="{ 'is-collapsed': !activePanels.clickers, 'is-unlocked': !panelLocks.clickers }"
-        :style="panelInlineStyle('clickers')"
-        :ref="(element) => setPanelElement('clickers', element)"
-      >
+      <article class="panel nodes-panel resizable-panel" :class="{ 'is-collapsed': !activePanels.clickers }">
         <button class="panel-toggle" type="button" @click="togglePanel('clickers')">
           <span>Keystrokes</span>
-          <span class="panel-toggle-right">
-            <span
-              class="panel-lock-button"
-              role="button"
-              tabindex="0"
-              :aria-label="panelLocks.clickers ? 'Unlock resizing for keystrokes panel' : 'Lock keystrokes panel size'"
-              @click.stop="togglePanelLock('clickers')"
-              @keydown.enter.prevent="togglePanelLock('clickers')"
-              @keydown.space.prevent="togglePanelLock('clickers')"
-            >
-              {{ panelLocks.clickers ? 'lock' : 'lock_open' }}
-            </span>
-            <span>{{ activePanels.clickers ? 'Collapse' : 'Expand' }}</span>
-          </span>
+          <span>{{ activePanels.clickers ? 'Collapse' : 'Expand' }}</span>
         </button>
         <Transition name="panel-reveal">
           <!-- clickersSection: first active node subsection for manual clicker actions. -->
@@ -616,6 +806,7 @@ onBeforeUnmount(() => {
               >
                 <span class="level-badge">L{{ displayNodeLevel(node.nodeID) }}</span>
                 <div class="node-title">{{ node.nodeName }}</div>
+                <div class="node-cost">Cost: {{ inputCostSummary(node.nodeID) }}</div>
                 <button
                   class="primary-node-action"
                   type="button"
@@ -642,66 +833,175 @@ onBeforeUnmount(() => {
         </Transition>
       </article>
 
-      <article
-        class="panel nodes-panel resizable-panel placeholder-panel"
-        :class="{ 'is-collapsed': !activePanels.operations, 'is-unlocked': !panelLocks.operations }"
-        :style="panelInlineStyle('operations')"
-        :ref="(element) => setPanelElement('operations', element)"
-      >
+      <article class="panel nodes-panel resizable-panel placeholder-panel" :class="{ 'is-collapsed': !activePanels.operations }">
         <button class="panel-toggle" type="button" @click="togglePanel('operations')">
           <span>Operations</span>
-          <span class="panel-toggle-right">
-            <span
-              class="panel-lock-button"
-              role="button"
-              tabindex="0"
-              :aria-label="panelLocks.operations ? 'Unlock resizing for operations panel' : 'Lock operations panel size'"
-              @click.stop="togglePanelLock('operations')"
-              @keydown.enter.prevent="togglePanelLock('operations')"
-              @keydown.space.prevent="togglePanelLock('operations')"
-            >
-              {{ panelLocks.operations ? 'lock' : 'lock_open' }}
-            </span>
-            <span>{{ activePanels.operations ? 'Collapse' : 'Expand' }}</span>
-          </span>
+          <span>{{ activePanels.operations ? 'Collapse' : 'Expand' }}</span>
         </button>
+        <div v-if="activePanels.operations" class="section-controls">
+          <button class="talent-upgrade" type="button" @click="startAllTimedTasks">Start All Available</button>
+        </div>
         <Transition name="panel-reveal">
-          <div v-if="activePanels.operations" class="placeholder-node info-panel">
-            <strong>Placeholder Node</strong>
-            <span>Queued for future timed tasks.</span>
+          <div v-if="activePanels.operations" class="node-grid operation-grid">
+            <article
+              v-for="node in timedTaskNodes"
+              :key="node.nodeID"
+              class="node-card operation-card"
+              :class="{ 'is-node-locked': !state.nodes[node.nodeID].unlocked }"
+            >
+              <span class="level-badge">L{{ displayNodeLevel(node.nodeID) }}</span>
+              <div class="node-title">{{ node.nodeName }}</div>
+              <div class="node-cost">Cost: {{ inputCostSummary(node.nodeID) }}</div>
+              <button
+                class="primary-node-action"
+                type="button"
+                :disabled="!state.nodes[node.nodeID].unlocked || state.nodes[node.nodeID].isRunning"
+                @click="startTimedTask(node.nodeID)"
+              >
+                {{ state.nodes[node.nodeID].isRunning ? 'Running...' : 'Start Task' }}
+              </button>
+              <div class="task-progress-wrap">
+                <div class="task-progress-bar" :style="{ width: `${progressPercent(node.nodeID)}%` }"></div>
+              </div>
+              <div class="node-footer">
+                <div class="node-stat">{{ outputSummary(node.nodeID) }}</div>
+                <button
+                  class="upgrade-button"
+                  type="button"
+                  :disabled="!canUpgradeNode(state, node.nodeID)"
+                  @click="upgradeSelectedNode(node.nodeID)"
+                >
+                  Upgrade
+                  <small>{{ upgradeCostSummary(node.nodeID) }}</small>
+                </button>
+              </div>
+            </article>
           </div>
         </Transition>
       </article>
 
-      <article
-        class="panel nodes-panel resizable-panel placeholder-panel"
-        :class="{ 'is-collapsed': !activePanels.systems, 'is-unlocked': !panelLocks.systems }"
-        :style="panelInlineStyle('systems')"
-        :ref="(element) => setPanelElement('systems', element)"
-      >
+      <article class="panel nodes-panel resizable-panel placeholder-panel" :class="{ 'is-collapsed': !activePanels.systems }">
         <button class="panel-toggle" type="button" @click="togglePanel('systems')">
           <span>Systems</span>
-          <span class="panel-toggle-right">
-            <span
-              class="panel-lock-button"
-              role="button"
-              tabindex="0"
-              :aria-label="panelLocks.systems ? 'Unlock resizing for systems panel' : 'Lock systems panel size'"
-              @click.stop="togglePanelLock('systems')"
-              @keydown.enter.prevent="togglePanelLock('systems')"
-              @keydown.space.prevent="togglePanelLock('systems')"
-            >
-              {{ panelLocks.systems ? 'lock' : 'lock_open' }}
-            </span>
-            <span>{{ activePanels.systems ? 'Collapse' : 'Expand' }}</span>
-          </span>
+          <span>{{ activePanels.systems ? 'Collapse' : 'Expand' }}</span>
         </button>
+        <div v-if="activePanels.systems" class="section-controls dual">
+          <button class="talent-upgrade" type="button" @click="enableAllPassiveSystems(true)">Enable All</button>
+          <button class="talent-upgrade" type="button" @click="enableAllPassiveSystems(false)">Disable All</button>
+        </div>
         <Transition name="panel-reveal">
-          <div v-if="activePanels.systems" class="placeholder-node info-panel">
-            <strong>Placeholder Node</strong>
-            <span>Queued for future passive systems.</span>
+          <div v-if="activePanels.systems" class="node-grid system-grid">
+            <article
+              v-for="node in passiveNodes"
+              :key="node.nodeID"
+              class="node-card system-card"
+              :class="{ 'is-node-locked': !state.nodes[node.nodeID].unlocked }"
+            >
+              <span class="level-badge">L{{ displayNodeLevel(node.nodeID) }}</span>
+              <div class="node-title">{{ node.nodeName }}</div>
+              <div class="node-cost">Cost: {{ inputCostSummary(node.nodeID, true) }}</div>
+              <button
+                class="primary-node-action"
+                type="button"
+                :disabled="!state.nodes[node.nodeID].unlocked"
+                @click="togglePassiveSystem(node.nodeID)"
+              >
+                {{ state.nodes[node.nodeID].enabled ? 'Disable' : 'Enable' }}
+              </button>
+              <div class="system-status">
+                <span>{{ state.nodes[node.nodeID].enabled ? 'Active' : 'Idle' }}</span>
+              </div>
+              <div class="node-footer">
+                <div class="node-stat">{{ outputSummary(node.nodeID) }}/s</div>
+                <button
+                  class="upgrade-button"
+                  type="button"
+                  :disabled="!canUpgradeNode(state, node.nodeID)"
+                  @click="upgradeSelectedNode(node.nodeID)"
+                >
+                  Upgrade
+                  <small>{{ upgradeCostSummary(node.nodeID) }}</small>
+                </button>
+              </div>
+            </article>
           </div>
         </Transition>
+      </article>
+    </section>
+
+    <section class="meta-layout">
+      <article class="panel meta-panel">
+        <div class="panel-heading">Prestige Protocol</div>
+        <div class="meta-stats">
+          <div class="meta-stat">
+            <span>Cypher Shards</span>
+            <strong>{{ state.meta.cypherShards }}</strong>
+          </div>
+          <div class="meta-stat">
+            <span>Lifetime Shards</span>
+            <strong>{{ state.meta.lifetimeCypherShards }}</strong>
+          </div>
+          <div class="meta-stat">
+            <span>Prestige Count</span>
+            <strong>{{ state.meta.prestigeCount }}</strong>
+          </div>
+        </div>
+        <p class="meta-copy">
+          Prestige requires at least 50,000 money and absolute reputation of 250. Estimated shard gain:
+          <strong>{{ prestigeGain }}</strong>.
+        </p>
+        <button class="prestige-button" type="button" :disabled="!canPrestige(state)" @click="triggerPrestige">
+          Initiate Prestige Reset
+        </button>
+      </article>
+
+      <article class="panel meta-panel">
+        <div class="panel-heading">Talent Matrix</div>
+        <div class="talent-grid">
+          <article v-for="talent in talentCards" :key="talent.key" class="talent-card info-panel">
+            <strong>{{ talent.name }}</strong>
+            <span>{{ talent.description }}</span>
+            <div class="talent-meta">
+              <em>Level {{ talent.level }}</em>
+              <em>{{ Number.isFinite(talent.cost) ? `Cost ${talent.cost}` : 'Maxed' }}</em>
+            </div>
+            <button
+              class="talent-upgrade"
+              type="button"
+              :disabled="!talent.canUpgrade"
+              @click="upgradeTalent(talent.key)"
+            >
+              Upgrade Talent
+            </button>
+          </article>
+        </div>
+      </article>
+    </section>
+
+    <section class="meta-layout">
+      <article class="panel meta-panel">
+        <div class="panel-heading">Minigame Hub</div>
+        <p class="meta-copy">
+          Launch a dedicated popup game window with keyboard and mouse controls. Survive and cash out rewards back into
+          your main progression.
+        </p>
+        <button class="prestige-button" type="button" @click="launchDefenseWindow">Launch Virus Pipe Defense Window</button>
+        <p v-if="minigameStatus" class="meta-copy">{{ minigameStatus }}</p>
+      </article>
+
+      <article class="panel meta-panel">
+        <div class="minigame-pane">
+          <h3>Active Game Loop</h3>
+          <p>
+            The standalone popup runs a full Virus Pipe Defense session. Clear waves, protect integrity, and cash out for
+            money, compute, and crypto rewards.
+          </p>
+          <ul class="minigame-log">
+            <li>Mouse click places turrets on valid tiles.</li>
+            <li>Space starts waves, keys 1/2/3 adjust sim speed.</li>
+            <li>Cash Out writes rewards back into Gray Protocol automatically.</li>
+          </ul>
+        </div>
       </article>
     </section>
 
@@ -1006,7 +1306,8 @@ h1 {
 }
 
 .top-row,
-.node-layout {
+.node-layout,
+.meta-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
 }
@@ -1031,6 +1332,11 @@ h1 {
   gap: 1rem;
 }
 
+.meta-layout {
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
 .panel {
   min-height: 8rem;
   padding: 1rem;
@@ -1041,14 +1347,10 @@ h1 {
 }
 
 .resizable-panel {
-  resize: none;
+  resize: both;
   min-width: min(100%, 18rem);
   max-width: 100%;
   overflow: auto;
-}
-
-.resizable-panel.is-unlocked {
-  resize: both;
 }
 
 .top-row .resizable-panel {
@@ -1266,7 +1568,9 @@ h1 {
 
 .panel-toggle,
 .primary-node-action,
-.upgrade-button {
+.upgrade-button,
+.prestige-button,
+.talent-upgrade {
   background: transparent;
   border: 1px solid #ff006e;
   color: #ff006e;
@@ -1302,32 +1606,6 @@ h1 {
   text-shadow: 0 0 6px rgba(57, 255, 20, 0.4);
 }
 
-.panel-toggle-right {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-
-.panel-lock-button {
-  display: inline-grid;
-  place-items: center;
-  min-width: 1.2rem;
-  min-height: 1.2rem;
-  border: 1px solid rgba(0, 245, 255, 0.34);
-  border-radius: 4px;
-  color: #00f5ff;
-  font-family: "Material Symbols Rounded";
-  font-size: 0.95rem;
-  font-variation-settings: "FILL" 0, "wght" 500, "GRAD" 0, "opsz" 24;
-  line-height: 1;
-  cursor: pointer;
-  user-select: none;
-}
-
-.panel-lock-button:focus-visible {
-  outline: 1px solid #00f5ff;
-  outline-offset: 1px;
-}
 
 .resource-stack {
   display: grid;
@@ -1489,10 +1767,10 @@ h1 {
 
 .node-card {
   position: relative;
-  min-height: 9.5rem;
+  min-height: 10.5rem;
   padding: 0.65rem;
   display: grid;
-  grid-template-rows: minmax(1.2rem, auto) minmax(2.8rem, auto) minmax(2.5rem, auto);
+  grid-template-rows: minmax(1.2rem, auto) minmax(1rem, auto) minmax(2.8rem, auto) minmax(2.5rem, auto);
   gap: 0.5rem;
   background: rgba(10, 10, 15, 0.86);
   border: 1px solid rgba(0, 245, 255, 0.24);
@@ -1512,6 +1790,39 @@ h1 {
   filter: saturate(0.55);
 }
 
+.operation-grid,
+.system-grid {
+  align-items: start;
+}
+
+.operation-card,
+.system-card {
+  min-height: 12rem;
+  grid-template-rows: minmax(1.2rem, auto) minmax(1rem, auto) minmax(2.8rem, auto) minmax(1.3rem, auto) minmax(2.5rem, auto);
+}
+
+.task-progress-wrap {
+  width: 100%;
+  height: 0.6rem;
+  border: 1px solid rgba(0, 245, 255, 0.28);
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(0, 245, 255, 0.08);
+}
+
+.task-progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #39ff14 0%, #00f5ff 100%);
+  transition: width 120ms linear;
+}
+
+.system-status {
+  font-size: 0.68rem;
+  color: #39ff14;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
 .level-badge {
   position: absolute;
   top: 0.4rem;
@@ -1528,6 +1839,13 @@ h1 {
   font-size: 0.8rem;
   font-weight: 700;
   text-shadow: 0 0 10px rgba(0, 245, 255, 0.6);
+}
+
+.node-cost {
+  color: rgba(57, 255, 20, 0.96);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 0.64rem;
+  line-height: 1.2;
 }
 
 .primary-node-action {
@@ -1596,6 +1914,228 @@ h1 {
   font-size: 0.58rem;
   text-transform: none;
   text-shadow: 0 0 6px rgba(57, 255, 20, 0.4);
+}
+
+.meta-panel {
+  min-height: 10rem;
+}
+
+.meta-stats {
+  margin-top: 0.7rem;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.meta-stat {
+  padding: 0.55rem;
+  border: 1px solid rgba(0, 245, 255, 0.24);
+  border-radius: 6px;
+  background: rgba(0, 245, 255, 0.04);
+  display: grid;
+  gap: 0.2rem;
+}
+
+.meta-stat span {
+  color: #00f5ff;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+}
+
+.meta-stat strong {
+  color: #39ff14;
+  font-size: 1rem;
+}
+
+.meta-copy {
+  margin: 0.75rem 0;
+  color: #39ff14;
+  font-size: 0.78rem;
+}
+
+.prestige-button {
+  width: 100%;
+  min-height: 2.5rem;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.prestige-button:disabled,
+.talent-upgrade:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.talent-grid {
+  margin-top: 0.7rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0.55rem;
+}
+
+.talent-card {
+  padding: 0.65rem;
+  border-radius: 6px;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.talent-card strong {
+  color: #00f5ff;
+  font-size: 0.82rem;
+}
+
+.talent-card span {
+  color: #39ff14;
+  font-size: 0.74rem;
+}
+
+.talent-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.4rem;
+  color: #f0f7ff;
+  font-size: 0.7rem;
+}
+
+.talent-upgrade {
+  min-height: 2rem;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.section-controls {
+  margin-top: 0.45rem;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.section-controls.dual {
+  grid-template-columns: 1fr 1fr;
+}
+
+.minigame-tab-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.minigame-tab {
+  min-height: 1.9rem;
+  padding: 0 0.55rem;
+  border: 1px solid rgba(0, 245, 255, 0.3);
+  border-radius: 6px;
+  background: rgba(0, 245, 255, 0.05);
+  color: #00f5ff;
+  text-transform: uppercase;
+  font-size: 0.64rem;
+  cursor: pointer;
+}
+
+.minigame-tab.active {
+  border-color: rgba(255, 0, 110, 0.65);
+  color: #39ff14;
+}
+
+.minigame-pane {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.minigame-pane h3 {
+  margin: 0;
+  color: #00f5ff;
+  font-size: 0.95rem;
+}
+
+.minigame-pane p {
+  margin: 0;
+  color: #39ff14;
+  font-size: 0.75rem;
+}
+
+.minigame-pane input {
+  min-height: 2.2rem;
+  padding: 0.4rem;
+  border: 1px solid rgba(0, 245, 255, 0.25);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  color: #00f5ff;
+}
+
+.minigame-log {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: #39ff14;
+  font-size: 0.72rem;
+}
+
+.matrix-board {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.35rem;
+}
+
+.matrix-card {
+  min-height: 2rem;
+  border: 1px solid rgba(0, 245, 255, 0.25);
+  border-radius: 6px;
+  background: rgba(0, 245, 255, 0.08);
+  color: #00f5ff;
+  cursor: pointer;
+}
+
+.stack-track {
+  position: relative;
+  height: 2rem;
+  border: 1px solid rgba(0, 245, 255, 0.25);
+  border-radius: 999px;
+  background: rgba(0, 245, 255, 0.06);
+}
+
+.stack-target,
+.stack-runner {
+  position: absolute;
+  top: 0.2rem;
+  width: 0.8rem;
+  height: 1.6rem;
+  border-radius: 4px;
+  transform: translateX(-50%);
+}
+
+.stack-target {
+  background: rgba(255, 0, 110, 0.8);
+}
+
+.stack-runner {
+  background: rgba(57, 255, 20, 0.82);
+}
+
+.lane-grid {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.lane-row {
+  position: relative;
+  min-height: 2.2rem;
+  border: 1px solid rgba(0, 245, 255, 0.25);
+  border-radius: 6px;
+  overflow: hidden;
+  background: rgba(0, 245, 255, 0.06);
+}
+
+.lane-progress {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: linear-gradient(90deg, rgba(255, 0, 110, 0.22), rgba(255, 0, 110, 0.78));
+}
+
+.lane-row .matrix-card {
+  position: absolute;
+  right: 0.3rem;
+  top: 0.2rem;
+  z-index: 1;
 }
 
 .clicker-entry-enter-active,
@@ -1932,6 +2472,11 @@ h1 {
     grid-template-columns: minmax(28rem, 1fr) minmax(18rem, 0.48fr) minmax(18rem, 0.48fr);
     align-items: start;
   }
+
+  .meta-layout {
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+    align-items: start;
+  }
 }
 
 @media (max-width: 620px) {
@@ -1955,6 +2500,10 @@ h1 {
   .node-stat {
     border-right: 0;
     border-bottom: 1px solid rgba(0, 245, 255, 0.45);
+  }
+
+  .meta-stats {
+    grid-template-columns: 1fr;
   }
 }
 </style>

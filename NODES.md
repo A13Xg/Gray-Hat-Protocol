@@ -75,6 +75,13 @@ A clicker node executes once when the player presses its action button.
 - Produces its scaled `baseOutput` immediately.
 - Does not need `durationMs`.
 
+Current notable clickers:
+
+- `Hack Computer` (starter blackhat-leaning rep change)
+- `Harden Computer` (starter whitehat-leaning rep change)
+- `Lockdown Firewall` (high-tier whitehat clicker, gated by `reputationMin`)
+- `Port-Scan` (high-tier blackhat clicker, gated by `reputationMax`)
+
 ### `passive`
 
 A passive node runs continuously while enabled and unlocked.
@@ -144,6 +151,14 @@ Examples:
 ```
 
 An empty object means the node has no special unlock requirements.
+
+## Reveal-Once UI Behavior
+
+For nodes with unlock constraints, runtime state tracks `revealed`:
+
+- Before first unlock, the node is hidden in the UI.
+- After first unlock, `revealed` remains true permanently.
+- If requirements are no longer met later, the node stays visible but is disabled/greyed.
 
 ## Upgrade Scaling
 

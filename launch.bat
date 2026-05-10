@@ -33,19 +33,30 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo [2/3] Installing project dependencies...
+echo [2/3] Installing project dependencies (including future added packages)...
 if exist package-lock.json (
-  call npm ci
+  call npm ci --include=dev --include=optional
   if errorlevel 1 (
-    echo npm ci failed. Retrying with npm install...
-    call npm install
+    echo npm ci failed (often lockfile drift). Retrying with npm install...
+    call npm install --include=dev --include=optional
   )
 ) else (
-  call npm install
+  call npm install --include=dev --include=optional
 )
 if errorlevel 1 (
   echo ERROR: Dependency install failed.
   exit /b 1
+)
+
+echo Verifying dependency tree health...
+call npm ls --depth=0 >nul 2>nul
+if errorlevel 1 (
+  echo Dependency tree has issues. Repairing with npm install...
+  call npm install --include=dev --include=optional
+  if errorlevel 1 (
+    echo ERROR: Dependency repair failed.
+    exit /b 1
+  )
 )
 
 echo [3/3] Launching development server...

@@ -76,8 +76,25 @@ export interface GameState {
   resources: ResourceMap
   time: TimeState
   nodes: Record<number, NodeRuntimeState>
+  meta: MetaState
   preferences: UserPreferences
   log: string[]
+}
+
+export type TalentKey =
+  | 'whitehatYield'
+  | 'blackhatYield'
+  | 'passiveEfficiency'
+  | 'taskAcceleration'
+  | 'reputationStability'
+  | 'computeSurge'
+
+export interface MetaState {
+  prestigeCount: number
+  cypherShards: number
+  lifetimeCypherShards: number
+  talentPointsSpent: number
+  talents: Record<TalentKey, number>
 }
 
 export interface UserPreferences {
@@ -103,6 +120,7 @@ export interface SerializedGameState {
   resources: SerializedResourceMap
   time: TimeState
   nodes: Record<number, SerializedNodeRuntimeState>
+  meta?: Partial<MetaState>
   preferences?: Partial<UserPreferences>
   log: string[]
 }
