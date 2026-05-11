@@ -347,17 +347,12 @@ function togglePanelLock(panel: ResizablePanelKey): void {
 }
 
 function formatWholeDecimal(value: Decimal): string {
-  const numberValue = value.toNumber()
-  if (!Number.isFinite(numberValue)) {
-    return formatResource(value)
-  }
-
-  return Math.round(numberValue).toLocaleString()
+  return formatResource(value)
 }
 
 function formatSignedWhole(value: Decimal): string {
-  const rounded = Math.round(value.toNumber())
-  return `${rounded >= 0 ? '+' : ''}${rounded.toLocaleString()}`
+  const formatted = formatResource(value)
+  return value.gte(0) ? `+${formatted}` : formatted
 }
 
 function formatRate(value: number): string {
