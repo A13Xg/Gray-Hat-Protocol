@@ -109,5 +109,384 @@
       "reputationMax": -300
     },
     "upgradeLevel": 0
+  },
+  {
+    "nodeID": 8,
+    "nodeName": "Script Farm",
+    "nodeType": "passive",
+    "baseInput": {},
+    "baseOutput": {
+      "money": 2,
+      "compute": 0.5
+    },
+    "baseMultiplier": 1.12,
+    "modMultiplier": 1,
+    "unlockRequirement": {
+      "requiredNodeIDs": [1]
+    },
+    "upgradeLevel": 0
+  },
+  {
+    "nodeID": 9,
+    "nodeName": "Botnet Relay",
+    "nodeType": "passive",
+    "baseInput": {
+      "compute": 0.5
+    },
+    "baseOutput": {
+      "money": 8,
+      "crypto": 0.3,
+      "reputation": -0.5
+    },
+    "baseMultiplier": 1.18,
+    "modMultiplier": 1,
+    "unlockRequirement": {
+      "reputationMax": -200,
+      "requiredNodeIDs": [8]
+    },
+    "upgradeLevel": 0
+  },
+  {
+    "nodeID": 10,
+    "nodeName": "Honeypot Network",
+    "nodeType": "passive",
+    "baseInput": {
+      "compute": 0.5
+    },
+    "baseOutput": {
+      "money": 4,
+      "reputation": 1
+    },
+    "baseMultiplier": 1.18,
+    "modMultiplier": 1,
+    "unlockRequirement": {
+      "reputationMin": 200,
+      "requiredNodeIDs": [8]
+    },
+    "upgradeLevel": 0
+  },
+  {
+    "nodeID": 11,
+    "nodeName": "Social Engineering",
+    "nodeType": "clicker",
+    "baseInput": {},
+    "baseOutput": {
+      "money": 6,
+      "reputation": -3
+    },
+    "baseMultiplier": 1.15,
+    "modMultiplier": 1,
+    "unlockRequirement": {
+      "requiredNodeIDs": [1]
+    },
+    "upgradeLevel": 0
+  },
+  {
+    "nodeID": 12,
+    "nodeName": "Patch Vulnerability",
+    "nodeType": "clicker",
+    "baseInput": {},
+    "baseOutput": {
+      "money": 6,
+      "reputation": 3
+    },
+    "baseMultiplier": 1.15,
+    "modMultiplier": 1,
+    "unlockRequirement": {
+      "requiredNodeIDs": [2]
+    },
+    "upgradeLevel": 0
+  },
+  {
+    "nodeID": 13,
+    "nodeName": "Zero-Day Research",
+    "nodeType": "timed-task",
+    "durationMs": 60000,
+    "baseInput": {
+      "money": 200,
+      "compute": 20
+    },
+    "baseOutput": {
+      "crypto": 50,
+      "money": 300,
+      "reputation": -10
+    },
+    "baseMultiplier": 1.15,
+    "modMultiplier": 1,
+    "unlockRequirement": {
+      "reputationMax": -50,
+      "requiredNodeIDs": [4]
+    },
+    "upgradeLevel": 0
+  },
+  {
+    "nodeID": 14,
+    "nodeName": "Bug Bounty Hunt",
+    "nodeType": "timed-task",
+    "durationMs": 45000,
+    "baseInput": {
+      "money": 100,
+      "compute": 10
+    },
+    "baseOutput": {
+      "money": 350,
+      "reputation": 15
+    },
+    "baseMultiplier": 1.15,
+    "modMultiplier": 1,
+    "unlockRequirement": {
+      "reputationMin": 50,
+      "requiredNodeIDs": [5]
+    },
+    "upgradeLevel": 0
+  },
+  {
+    "nodeID": 15,
+    "nodeName": "Deploy Ransomware",
+    "nodeType": "timed-task",
+    "durationMs": 90000,
+    "baseInput": {
+      "money": 500,
+      "compute": 50
+    },
+    "baseOutput": {
+      "money": 2000,
+      "crypto": 100,
+      "reputation": -50
+    },
+    "baseMultiplier": 1.2,
+    "modMultiplier": 1,
+    "unlockRequirement": {
+      "reputationMax": -300,
+      "requiredNodeIDs": [13]
+    },
+    "upgradeLevel": 0
+  },
+  {
+    "nodeID": 16,
+    "nodeName": "Incident Response",
+    "nodeType": "timed-task",
+    "durationMs": 90000,
+    "baseInput": {
+      "money": 500,
+      "compute": 50
+    },
+    "baseOutput": {
+      "money": 2000,
+      "reputation": 50
+    },
+    "baseMultiplier": 1.2,
+    "modMultiplier": 1,
+    "unlockRequirement": {
+      "reputationMin": 300,
+      "requiredNodeIDs": [14]
+    },
+    "upgradeLevel": 0
+  },
+  {
+    "nodeID": 17,
+    "nodeName": "Darknet Market",
+    "nodeType": "passive",
+    "baseInput": {
+      "compute": 2,
+      "crypto": 0.5
+    },
+    "baseOutput": {
+      "money": 15,
+      "reputation": -1
+    },
+    "baseMultiplier": 1.2,
+    "modMultiplier": 1,
+    "unlockRequirement": {
+      "reputationMax": -400,
+      "requiredNodeIDs": [9, 15]
+    },
+    "upgradeLevel": 0
+  },
+  {
+    "nodeID": 18,
+    "nodeName": "Threat Intelligence",
+    "nodeType": "passive",
+    "baseInput": {
+      "money": 5
+    },
+    "baseOutput": {
+      "compute": 2,
+      "reputation": 0.5
+    },
+    "baseMultiplier": 1.2,
+    "modMultiplier": 1,
+    "unlockRequirement": {
+      "reputationMin": 400,
+      "requiredNodeIDs": [10, 16]
+    },
+    "upgradeLevel": 0
+  },
+  {
+    "nodeID": 19,
+    "nodeName": "Exploit Kit Build",
+    "nodeType": "timed-task",
+    "durationMs": 120000,
+    "baseInput": {
+      "money": 1000,
+      "compute": 100
+    },
+    "baseOutput": {
+      "money": 5000,
+      "crypto": 300,
+      "reputation": -100
+    },
+    "baseMultiplier": 1.22,
+    "modMultiplier": 1,
+    "unlockRequirement": {
+      "reputationMax": -500,
+      "requiredNodeIDs": [17]
+    },
+    "upgradeLevel": 0
+  },
+  {
+    "nodeID": 20,
+    "nodeName": "Penetration Test",
+    "nodeType": "timed-task",
+    "durationMs": 120000,
+    "baseInput": {
+      "money": 1000,
+      "compute": 100
+    },
+    "baseOutput": {
+      "money": 5000,
+      "reputation": 100
+    },
+    "baseMultiplier": 1.22,
+    "modMultiplier": 1,
+    "unlockRequirement": {
+      "reputationMin": 500,
+      "requiredNodeIDs": [18]
+    },
+    "upgradeLevel": 0
+  },
+  {
+    "nodeID": 21,
+    "nodeName": "Cyber Arms Dealer",
+    "nodeType": "passive",
+    "baseInput": {
+      "compute": 5,
+      "crypto": 2
+    },
+    "baseOutput": {
+      "money": 40,
+      "reputation": -2
+    },
+    "baseMultiplier": 1.25,
+    "modMultiplier": 1,
+    "unlockRequirement": {
+      "reputationMax": -600,
+      "requiredNodeIDs": [17, 19]
+    },
+    "upgradeLevel": 0
+  },
+  {
+    "nodeID": 22,
+    "nodeName": "Security Consultancy",
+    "nodeType": "passive",
+    "baseInput": {
+      "compute": 3,
+      "money": 10
+    },
+    "baseOutput": {
+      "money": 45,
+      "reputation": 2
+    },
+    "baseMultiplier": 1.25,
+    "modMultiplier": 1,
+    "unlockRequirement": {
+      "reputationMin": 600,
+      "requiredNodeIDs": [18, 20]
+    },
+    "upgradeLevel": 0
+  },
+  {
+    "nodeID": 23,
+    "nodeName": "Quantum Decryption",
+    "nodeType": "clicker",
+    "baseInput": {
+      "crypto": 10,
+      "compute": 5
+    },
+    "baseOutput": {
+      "money": 500,
+      "reputation": -20
+    },
+    "baseMultiplier": 1.3,
+    "modMultiplier": 1,
+    "unlockRequirement": {
+      "reputationMax": -700,
+      "requiredNodeIDs": [21]
+    },
+    "upgradeLevel": 0
+  },
+  {
+    "nodeID": 24,
+    "nodeName": "Cyber Defense Grid",
+    "nodeType": "clicker",
+    "baseInput": {
+      "money": 200,
+      "compute": 10
+    },
+    "baseOutput": {
+      "money": 500,
+      "reputation": 20
+    },
+    "baseMultiplier": 1.3,
+    "modMultiplier": 1,
+    "unlockRequirement": {
+      "reputationMin": 700,
+      "requiredNodeIDs": [22]
+    },
+    "upgradeLevel": 0
+  },
+  {
+    "nodeID": 25,
+    "nodeName": "AI Hacking Suite",
+    "nodeType": "timed-task",
+    "durationMs": 300000,
+    "baseInput": {
+      "money": 10000,
+      "crypto": 500,
+      "compute": 500
+    },
+    "baseOutput": {
+      "money": 50000,
+      "crypto": 2000,
+      "reputation": -500
+    },
+    "baseMultiplier": 1.3,
+    "modMultiplier": 1,
+    "unlockRequirement": {
+      "reputationMax": -800,
+      "requiredNodeIDs": [23]
+    },
+    "upgradeLevel": 0
+  },
+  {
+    "nodeID": 26,
+    "nodeName": "AI Threat Monitor",
+    "nodeType": "timed-task",
+    "durationMs": 300000,
+    "baseInput": {
+      "money": 10000,
+      "compute": 500
+    },
+    "baseOutput": {
+      "money": 50000,
+      "reputation": 500
+    },
+    "baseMultiplier": 1.3,
+    "modMultiplier": 1,
+    "unlockRequirement": {
+      "reputationMin": 800,
+      "requiredNodeIDs": [24]
+    },
+    "upgradeLevel": 0
   }
 ]

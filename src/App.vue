@@ -9,13 +9,16 @@ import {
   executeClickNode,
   getNodeUpgradeCost,
   replaceResources,
+  startTimedNode,
   tick,
+  togglePassiveNode,
   upgradeNode,
 } from './core/engine'
-import { NODE_DEFINITIONS, getScaledOutput } from './core/nodes'
-import { clearSave, forceClearBrowserState, loadGame, saveGame } from './core/persistence'
+import { NODE_DEFINITIONS, getScaledInput, getScaledOutput } from './core/nodes'
+import { clearSave, exportSave, forceClearBrowserState, importSave, loadGame, saveGame } from './core/persistence'
 import { getReputationAlignment } from './core/resources'
 import { calculateDeltaMs, nowMs } from './core/time'
+import { formatDuration, formatResource } from './utils/formatter'
 import blackHatImage from './assets/images/BlackHat.png'
 import greyHatImage from './assets/images/GreyHat.png'
 import whiteHatImage from './assets/images/WhiteHat.png'
@@ -24,6 +27,12 @@ import type { ReputationAlignment, ResourceKey } from './core/types'
 type RateMap = Record<ResourceKey, number>
 type CollapsiblePanel = 'resources' | 'clock' | 'clickers' | 'operations' | 'systems'
 type ResizablePanelKey = 'clickers' | 'operations' | 'systems'
+
+interface Toast {
+  id: number
+  message: string
+  type: 'success' | 'error' | 'info'
+}
 
 const resourceIcons: Record<ResourceKey, string> = {
   money: 'paid',
@@ -75,6 +84,10 @@ const isForceClearing = ref(false)
 const debugStatusMessage = ref('')
 const debugResourceKey = ref<ResourceKey>('money')
 const debugResourceAmount = ref('100')
+const importSaveText = ref('')
+const importStatusMessage = ref('')
+const toasts = ref<Toast[]>([])
+let toastCounter = 0
 const resourceRates = reactive<RateMap>({
   money: 0,
   crypto: 0,
@@ -98,9 +111,8 @@ let previousFrameAt = nowMs()
 const layoutStorageKey = 'gray-hat-protocol-layout-v1'
 
 const clickerNodes = computed(() => {
-  const allowedNames = new Set(['Hack Computer', 'Harden Computer', 'Lockdown Firewall', 'Port-Scan'])
   return NODE_DEFINITIONS.filter((node) => {
-    if (node.nodeType !== 'clicker' || !allowedNames.has(node.nodeName)) {
+    if (node.nodeType !== 'clicker') {
       return false
     }
 
@@ -116,6 +128,26 @@ const resourceCards = computed(() => {
     value: formatWholeDecimal(state.value.resources[key]),
     rate: formatRate(resourceRates[key]),
   }))
+})
+
+const timedTaskNodes = computed(() => {
+  return NODE_DEFINITIONS.filter((node) => {
+    if (node.nodeType !== 'timed-task') {
+      return false
+    }
+
+    return Boolean(state.value.nodes[node.nodeID]?.revealed)
+  })
+})
+
+const passiveNodes = computed(() => {
+  return NODE_DEFINITIONS.filter((node) => {
+    if (node.nodeType !== 'passive') {
+      return false
+    }
+
+    return Boolean(state.value.nodes[node.nodeID]?.revealed)
+  })
 })
 const reputationAlignment = computed(() => getReputationAlignment(state.value.resources))
 const hatImageSrc = computed(() => hatImages[reputationAlignment.value])
@@ -150,7 +182,26 @@ const clockSegments = computed(() => {
 function stepGame(): void {
   const timestamp = nowMs()
   const deltaMs = calculateDeltaMs(state.value.time, timestamp)
-  state.value = tick(state.value, deltaMs)
+
+  const previousLog = state.value.log
+  let nextState = tick(state.value, deltaMs)
+  const newEntries = nextState.log.slice(previousLog.length)
+
+  for (const entry of newEntries) {
+    if (entry.includes('completed')) {
+      showToast(entry, 'success')
+    }
+  }
+
+  // Auto-run: restart timed tasks that have auto-run enabled and just completed
+  for (const [nodeIDStr, runtimeState] of Object.entries(nextState.nodes)) {
+    const nodeID = Number(nodeIDStr)
+    if (runtimeState.autoRun && runtimeState.unlocked && !runtimeState.isRunning) {
+      nextState = startTimedNode(nextState, nodeID)
+    }
+  }
+
+  state.value = nextState
 }
 
 function updateResourceRates(timestamp: number): void {
@@ -184,6 +235,32 @@ function animateFrame(): void {
 
 function executeNode(nodeID: number): void {
   state.value = executeClickNode(state.value, nodeID)
+}
+
+function triggerTimedNode(nodeID: number): void {
+  state.value = startTimedNode(state.value, nodeID)
+}
+
+function togglePassive(nodeID: number, enabled: boolean): void {
+  state.value = togglePassiveNode(state.value, nodeID, enabled)
+}
+
+function toggleAutoRun(nodeID: number): void {
+  const runtimeState = state.value.nodes[nodeID]
+  if (!runtimeState) {
+    return
+  }
+
+  state.value = {
+    ...state.value,
+    nodes: {
+      ...state.value.nodes,
+      [nodeID]: {
+        ...runtimeState,
+        autoRun: !runtimeState.autoRun,
+      },
+    },
+  }
 }
 
 function upgradeSelectedNode(nodeID: number): void {
@@ -272,7 +349,7 @@ function togglePanelLock(panel: ResizablePanelKey): void {
 function formatWholeDecimal(value: Decimal): string {
   const numberValue = value.toNumber()
   if (!Number.isFinite(numberValue)) {
-    return value.toString()
+    return formatResource(value)
   }
 
   return Math.round(numberValue).toLocaleString()
@@ -298,6 +375,49 @@ function outputSummary(nodeID: number): string {
   return Object.entries(getScaledOutput(definition, runtimeState))
     .map(([key, value]) => `${formatSignedWhole(value)} ${key === 'reputation' ? 'Rep' : key}`)
     .join(' / ')
+}
+
+function inputSummary(nodeID: number): string {
+  const definition = NODE_DEFINITIONS.find((node) => node.nodeID === nodeID)
+  const runtimeState = state.value.nodes[nodeID]
+  if (!definition || !runtimeState) {
+    return ''
+  }
+
+  const entries = Object.entries(getScaledInput(definition, runtimeState))
+  if (entries.length === 0) {
+    return 'Free'
+  }
+
+  return entries.map(([key, value]) => `${formatWholeDecimal(value)} ${key}`).join(' / ')
+}
+
+function nodeProgress(nodeID: number): number {
+  const runtimeState = state.value.nodes[nodeID]
+  const definition = NODE_DEFINITIONS.find((node) => node.nodeID === nodeID)
+  if (!runtimeState || !definition?.durationMs || !runtimeState.isRunning) {
+    return 0
+  }
+
+  return Math.min(100, (runtimeState.progressMs / definition.durationMs) * 100)
+}
+
+function nodeTimeRemaining(nodeID: number): string {
+  const runtimeState = state.value.nodes[nodeID]
+  const definition = NODE_DEFINITIONS.find((node) => node.nodeID === nodeID)
+  if (!runtimeState || !definition?.durationMs || !runtimeState.isRunning) {
+    return ''
+  }
+
+  return formatDuration(definition.durationMs - runtimeState.progressMs)
+}
+
+function showToast(message: string, type: Toast['type'] = 'info'): void {
+  const id = ++toastCounter
+  toasts.value.push({ id, message, type })
+  window.setTimeout(() => {
+    toasts.value = toasts.value.filter((t) => t.id !== id)
+  }, 3500)
 }
 
 function upgradeCostSummary(nodeID: number): string {
@@ -472,6 +592,35 @@ function persistStateNow(): void {
   state.value = saveGame(state.value)
 }
 
+function handleExportSave(): void {
+  const data = exportSave(state.value)
+  try {
+    navigator.clipboard.writeText(data).then(() => {
+      showToast('Save data copied to clipboard!', 'success')
+    }).catch(() => {
+      showToast('Export failed — copy from debug console.', 'error')
+      console.info('SAVE DATA:', data)
+    })
+  } catch {
+    showToast('Export failed — copy from debug console.', 'error')
+    console.info('SAVE DATA:', data)
+  }
+}
+
+function handleImportSave(): void {
+  const raw = importSaveText.value.trim()
+  if (!raw) {
+    importStatusMessage.value = 'Paste your save data first.'
+    return
+  }
+
+  const imported = importSave(raw)
+  state.value = imported
+  syncPreviousResourcesFromState()
+  importStatusMessage.value = 'Save imported successfully!'
+  importSaveText.value = ''
+}
+
 function handleBeforeUnload(): void {
   persistStateNow()
 }
@@ -643,7 +792,7 @@ onBeforeUnmount(() => {
       </article>
 
       <article
-        class="panel nodes-panel resizable-panel placeholder-panel"
+        class="panel nodes-panel resizable-panel"
         :class="{ 'is-collapsed': !activePanels.operations, 'is-unlocked': !panelLocks.operations }"
         :style="panelInlineStyle('operations')"
         :ref="(element) => setPanelElement('operations', element)"
@@ -666,15 +815,83 @@ onBeforeUnmount(() => {
           </span>
         </button>
         <Transition name="panel-reveal">
-          <div v-if="activePanels.operations" class="placeholder-node info-panel">
-            <strong>Placeholder Node</strong>
-            <span>Queued for future timed tasks.</span>
+          <div v-if="activePanels.operations" class="node-grid">
+            <TransitionGroup name="clicker-entry">
+              <article
+                v-for="node in timedTaskNodes"
+                :key="node.nodeID"
+                class="node-card timed-node-card"
+                :class="{ 'is-node-locked': !state.nodes[node.nodeID].unlocked }"
+              >
+                <span class="level-badge">L{{ displayNodeLevel(node.nodeID) }}</span>
+                <div class="node-title">{{ node.nodeName }}</div>
+                <div class="timed-node-body">
+                  <div class="timed-progress-wrap">
+                    <div
+                      class="timed-progress-bar"
+                      :class="{ 'is-running': state.nodes[node.nodeID].isRunning }"
+                      :style="{ width: `${nodeProgress(node.nodeID)}%` }"
+                    ></div>
+                    <span v-if="state.nodes[node.nodeID].isRunning" class="timed-progress-label">
+                      {{ nodeTimeRemaining(node.nodeID) }}
+                    </span>
+                    <span v-else class="timed-progress-label idle-label">
+                      {{ formatDuration(node.durationMs ?? 0) }}
+                    </span>
+                  </div>
+                  <div class="timed-io-row">
+                    <span class="timed-io-label">Cost</span>
+                    <span class="timed-io-value cost-value">{{ inputSummary(node.nodeID) }}</span>
+                  </div>
+                  <div class="timed-io-row">
+                    <span class="timed-io-label">Reward</span>
+                    <span class="timed-io-value">{{ outputSummary(node.nodeID) }}</span>
+                  </div>
+                </div>
+                <div class="node-footer timed-footer">
+                  <button
+                    class="primary-node-action"
+                    type="button"
+                    :disabled="!state.nodes[node.nodeID].unlocked || state.nodes[node.nodeID].isRunning"
+                    @click="triggerTimedNode(node.nodeID)"
+                  >
+                    {{ state.nodes[node.nodeID].isRunning ? 'Running…' : 'Start' }}
+                  </button>
+                  <button
+                    class="auto-run-button"
+                    type="button"
+                    :class="{ 'is-active': state.nodes[node.nodeID].autoRun }"
+                    :disabled="!state.nodes[node.nodeID].unlocked"
+                    :aria-label="`${state.nodes[node.nodeID].autoRun ? 'Disable' : 'Enable'} auto-run for ${node.nodeName}`"
+                    @click="toggleAutoRun(node.nodeID)"
+                  >
+                    Auto
+                  </button>
+                  <button
+                    class="upgrade-button"
+                    type="button"
+                    :disabled="!canUpgradeNode(state, node.nodeID)"
+                    @click="upgradeSelectedNode(node.nodeID)"
+                  >
+                    Upgrade
+                    <small>{{ upgradeCostSummary(node.nodeID) }}</small>
+                  </button>
+                </div>
+                <div class="completions-badge" v-if="state.nodes[node.nodeID].completions > 0">
+                  ✓ {{ state.nodes[node.nodeID].completions }}
+                </div>
+              </article>
+            </TransitionGroup>
+            <div v-if="timedTaskNodes.length === 0" class="placeholder-node info-panel">
+              <strong>No Operations Unlocked</strong>
+              <span>Build reputation to unlock timed operations.</span>
+            </div>
           </div>
         </Transition>
       </article>
 
       <article
-        class="panel nodes-panel resizable-panel placeholder-panel"
+        class="panel nodes-panel resizable-panel"
         :class="{ 'is-collapsed': !activePanels.systems, 'is-unlocked': !panelLocks.systems }"
         :style="panelInlineStyle('systems')"
         :ref="(element) => setPanelElement('systems', element)"
@@ -697,9 +914,52 @@ onBeforeUnmount(() => {
           </span>
         </button>
         <Transition name="panel-reveal">
-          <div v-if="activePanels.systems" class="placeholder-node info-panel">
-            <strong>Placeholder Node</strong>
-            <span>Queued for future passive systems.</span>
+          <div v-if="activePanels.systems" class="node-grid">
+            <TransitionGroup name="clicker-entry">
+              <article
+                v-for="node in passiveNodes"
+                :key="node.nodeID"
+                class="node-card passive-node-card"
+                :class="{ 'is-node-locked': !state.nodes[node.nodeID].unlocked, 'is-enabled': state.nodes[node.nodeID].enabled }"
+              >
+                <span class="level-badge">L{{ displayNodeLevel(node.nodeID) }}</span>
+                <div class="node-title">{{ node.nodeName }}</div>
+                <div class="passive-io-col">
+                  <div class="timed-io-row" v-if="Object.keys(getScaledInput(node, state.nodes[node.nodeID])).length > 0">
+                    <span class="timed-io-label">Cost</span>
+                    <span class="timed-io-value cost-value">{{ inputSummary(node.nodeID) }}/s</span>
+                  </div>
+                  <div class="timed-io-row">
+                    <span class="timed-io-label">Gain</span>
+                    <span class="timed-io-value">{{ outputSummary(node.nodeID) }}/s</span>
+                  </div>
+                </div>
+                <div class="node-footer">
+                  <button
+                    class="primary-node-action toggle-passive-button"
+                    type="button"
+                    :class="{ 'is-enabled': state.nodes[node.nodeID].enabled }"
+                    :disabled="!state.nodes[node.nodeID].unlocked"
+                    @click="togglePassive(node.nodeID, !state.nodes[node.nodeID].enabled)"
+                  >
+                    {{ state.nodes[node.nodeID].enabled ? 'Disable' : 'Enable' }}
+                  </button>
+                  <button
+                    class="upgrade-button"
+                    type="button"
+                    :disabled="!canUpgradeNode(state, node.nodeID)"
+                    @click="upgradeSelectedNode(node.nodeID)"
+                  >
+                    Upgrade
+                    <small>{{ upgradeCostSummary(node.nodeID) }}</small>
+                  </button>
+                </div>
+              </article>
+            </TransitionGroup>
+            <div v-if="passiveNodes.length === 0" class="placeholder-node info-panel">
+              <strong>No Systems Online</strong>
+              <span>Hack or harden to unlock passive income.</span>
+            </div>
           </div>
         </Transition>
       </article>
@@ -723,6 +983,25 @@ onBeforeUnmount(() => {
               <span>Prevent Sleep</span>
               <span>{{ state.preferences.preventSleep ? 'Enabled' : 'Disabled' }}</span>
             </button>
+            <div class="save-io-section">
+              <button type="button" class="control-toggle" @click="handleExportSave">
+                <span>Export Save</span>
+                <span>Copy to Clipboard</span>
+              </button>
+              <div class="import-row">
+                <textarea
+                  v-model="importSaveText"
+                  class="import-textarea"
+                  placeholder="Paste save data here…"
+                  rows="3"
+                  aria-label="Paste save data to import"
+                ></textarea>
+                <button type="button" class="control-toggle import-btn" @click="handleImportSave">
+                  <span>Import Save</span>
+                </button>
+              </div>
+              <p v-if="importStatusMessage" class="import-status">{{ importStatusMessage }}</p>
+            </div>
             <button type="button" class="admin-entry-button" aria-label="Open admin menu" @click="openAdminMenu">⚙</button>
           </div>
 
@@ -825,6 +1104,18 @@ onBeforeUnmount(() => {
           </div>
         </section>
       </div>
+    </Teleport>
+    <Teleport to="body">
+      <TransitionGroup name="toast" tag="div" class="toast-container" aria-live="polite">
+        <div
+          v-for="toast in toasts"
+          :key="toast.id"
+          class="toast"
+          :class="`toast-${toast.type}`"
+        >
+          {{ toast.message }}
+        </div>
+      </TransitionGroup>
     </Teleport>
   </main>
 </template>
@@ -1918,9 +2209,247 @@ h1 {
   .title-copy.greyhat .hat-word::before,
   .title-copy.greyhat .hat-word::after,
   .title-copy.blackhat .hat-word,
-  .top-divider {
+  .top-divider,
+  .timed-progress-bar.is-running {
     animation: none;
   }
+} 
+
+/* ── Timed-task node card ─────────────────────────────────── */
+.timed-node-card {
+  grid-template-rows: minmax(1.2rem, auto) auto 1fr auto;
+}
+
+.timed-node-body {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.timed-progress-wrap {
+  position: relative;
+  height: 1.4rem;
+  border: 1px solid rgba(0, 245, 255, 0.22);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+
+.timed-progress-bar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  background: linear-gradient(90deg, rgba(57, 255, 20, 0.55), rgba(0, 245, 255, 0.45));
+  transition: width 0.1s linear;
+}
+
+.timed-progress-bar.is-running {
+  animation: progress-pulse 1.4s ease-in-out infinite;
+}
+
+.timed-progress-label {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #39ff14;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 0.64rem;
+  text-shadow: 0 0 6px rgba(57, 255, 20, 0.55);
+  pointer-events: none;
+}
+
+.idle-label {
+  color: rgba(0, 245, 255, 0.5);
+  text-shadow: none;
+}
+
+.timed-io-row {
+  display: flex;
+  gap: 0.4rem;
+  align-items: baseline;
+}
+
+.timed-io-label {
+  flex: 0 0 2.4rem;
+  color: rgba(0, 245, 255, 0.55);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 0.58rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.timed-io-value {
+  color: #39ff14;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 0.68rem;
+  text-shadow: 0 0 4px rgba(57, 255, 20, 0.4);
+  word-break: break-all;
+}
+
+.cost-value {
+  color: #ff006e;
+  text-shadow: 0 0 4px rgba(255, 0, 110, 0.4);
+}
+
+.timed-footer {
+  grid-template-columns: minmax(0, 1fr) auto minmax(6rem, 0.7fr);
+}
+
+.auto-run-button {
+  min-height: 2.5rem;
+  padding: 0 0.5rem;
+  border: 1px solid rgba(0, 245, 255, 0.3);
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(0, 245, 255, 0.55);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: color 140ms, border-color 140ms, background 140ms, box-shadow 140ms;
+}
+
+.auto-run-button.is-active {
+  border-color: #39ff14;
+  color: #39ff14;
+  background: rgba(57, 255, 20, 0.08);
+  box-shadow: 0 0 8px rgba(57, 255, 20, 0.3);
+}
+
+.auto-run-button:hover:not(:disabled) {
+  border-color: rgba(0, 245, 255, 0.7);
+  color: #00f5ff;
+}
+
+.auto-run-button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.completions-badge {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.45rem;
+  color: rgba(0, 245, 255, 0.65);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 0.58rem;
+  text-shadow: 0 0 5px rgba(0, 245, 255, 0.3);
+}
+
+/* ── Passive node card ────────────────────────────────────── */
+.passive-node-card {
+  grid-template-rows: minmax(1.2rem, auto) auto 1fr auto;
+}
+
+.passive-io-col {
+  display: grid;
+  gap: 0.3rem;
+  align-content: start;
+}
+
+.toggle-passive-button {
+  min-height: 2.5rem;
+}
+
+.toggle-passive-button.is-enabled {
+  border-color: #39ff14;
+  color: #39ff14;
+  box-shadow: 0 0 12px rgba(57, 255, 20, 0.3);
+  text-shadow: 0 0 8px rgba(57, 255, 20, 0.6);
+}
+
+.passive-node-card.is-enabled {
+  border-color: rgba(57, 255, 20, 0.4);
+  box-shadow: inset 0 0 28px rgba(57, 255, 20, 0.035), 0 14px 28px rgba(0, 0, 0, 0.24);
+}
+
+/* ── Save I/O section ─────────────────────────────────────── */
+.save-io-section {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.import-row {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.import-textarea {
+  width: 100%;
+  min-height: 4rem;
+  padding: 0.4rem;
+  border: 1px solid rgba(0, 245, 255, 0.2);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.03);
+  color: #00f5ff;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 0.72rem;
+  resize: vertical;
+}
+
+.import-btn {
+  justify-content: center;
+}
+
+.import-status {
+  margin: 0;
+  color: #39ff14;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 0.72rem;
+}
+
+/* ── Toast notifications ──────────────────────────────────── */
+.toast-container {
+  position: fixed;
+  bottom: 1.2rem;
+  right: 1.2rem;
+  z-index: 200;
+  display: grid;
+  gap: 0.5rem;
+  pointer-events: none;
+  max-width: min(22rem, calc(100vw - 2.4rem));
+}
+
+.toast {
+  padding: 0.6rem 0.9rem;
+  border-radius: 6px;
+  background: rgba(10, 10, 15, 0.95);
+  border: 1px solid rgba(0, 245, 255, 0.3);
+  color: #00f5ff;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 0.75rem;
+  box-shadow: 0 0 16px rgba(0, 245, 255, 0.18);
+  backdrop-filter: blur(12px);
+}
+
+.toast-success {
+  border-color: rgba(57, 255, 20, 0.45);
+  color: #39ff14;
+  box-shadow: 0 0 16px rgba(57, 255, 20, 0.2);
+}
+
+.toast-error {
+  border-color: rgba(255, 0, 110, 0.45);
+  color: #ff006e;
+  box-shadow: 0 0 16px rgba(255, 0, 110, 0.2);
+}
+
+.toast-enter-active,
+.toast-leave-active {
+  transition: opacity 240ms ease, transform 240ms ease;
+}
+
+.toast-enter-from,
+.toast-leave-to {
+  opacity: 0;
+  transform: translateX(1rem);
+}
+
+/* ── Keyframes ────────────────────────────────────────────── */
+@keyframes progress-pulse {
+  0%, 100% { opacity: 0.85; }
+  50% { opacity: 1; }
 }
 
 @media (min-width: 860px) {
